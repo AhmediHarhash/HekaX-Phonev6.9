@@ -1,0 +1,40 @@
+{
+  "name": "hekax-phone-backend",
+  "version": "2.0.0",
+  "description": "HEKAX Phone Backend - AI-Powered Business Phone System",
+  "main": "server.js",
+  "scripts": {
+    "postinstall": "prisma generate",
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "db:push": "npx prisma db push",
+    "db:generate": "npx prisma generate",
+    "db:migrate": "npx prisma migrate dev",
+    "db:studio": "npx prisma studio"
+  },
+  "keywords": ["twilio", "ai", "voice", "receptionist", "saas"],
+  "author": "HEKAX",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@deepgram/sdk": "^3.9.0",
+    "@prisma/client": "^5.22.0",
+    "archiver": "^7.0.0",
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "openai": "^4.77.0",
+    "prisma": "^5.22.0",
+    "stripe": "^14.10.0",
+    "twilio": "^5.10.6",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

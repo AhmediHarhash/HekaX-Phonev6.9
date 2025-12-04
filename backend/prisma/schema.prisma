@@ -1,0 +1,731 @@
+// ============================================================================
+// HEKAX Phone - Prisma Schema
+// Version: 2.0.0
+// ============================================================================
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum OrgStatus {
+  ACTIVE
+  SUSPENDED
+  TRIAL
+  CANCELLED
+  PENDING_SETUP
+}
+
+enum Plan {
+  TRIAL
+  STARTER
+  BUSINESS_PRO
+  SCALE
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MANAGER
+  AGENT
+  VIEWER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  INVITED
+  SUSPENDED
+}
+
+enum CallDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum CallStatus {
+  QUEUED
+  RINGING
+  IN_PROGRESS
+  COMPLETED
+  BUSY
+  NO_ANSWER
+  FAILED
+  CANCELLED
+  VOICEMAIL
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL
+  NEGOTIATION
+  WON
+  LOST
+  UNQUALIFIED
+}
+
+enum LeadUrgency {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum LeadTemp {
+  HOT
+  WARM
+  COLD
+}
+
+// ============================================================================
+// ORGANIZATION
+// ============================================================================
+
+model Organization {
+  id   String @id @default(cuid())
+  name String
+  slug String @unique
+
+  status    OrgStatus @default(ACTIVE)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  // Onboarding
+  onboardingCompleted Boolean @default(false)
+  industry            String  @default("general")
+
+ // Telephony
+  twilioNumber          String?  @unique
+  twilioAccountSid      String?
+  twilioAuthToken       String?
+  twilioSubAccountSid   String?  // Subaccount SID for multi-tenant
+  twilioSubAccountToken String?  // Subaccount Auth Token
+  twimlAppSid           String?  // TwiML App SID for this org
+  forwardingNumber      String?
+  pendingPhoneNumber    String?  // Selected during trial, purchased on subscription
+
+  // AI Receptionist
+  aiEnabled       Boolean @default(true)
+  voiceId         String?
+  voiceProvider   String  @default("elevenlabs")
+  greeting        String?
+  personality     String  @default("professional")
+  language        String  @default("en-US")
+  maxCallDuration Int     @default(600)
+  maxTurns        Int     @default(20)
+  aiModel         String  @default("gpt-4o")
+  aiTemperature   Float   @default(0.7)
+  systemPrompt    String? @db.Text
+
+  // Business Hours
+  timezone           String  @default("America/New_York")
+  businessHours      Json?
+  afterHoursMode     String  @default("ai")
+  afterHoursGreeting String?
+
+  // Branding
+  logoUrl        String?
+  faviconUrl     String?
+  primaryColor   String  @default("#3b82f6")
+  secondaryColor String  @default("#8b5cf6")
+  customDomain   String? @unique
+  emailFromName  String?
+  emailFromDomain String?
+
+  // Billing
+  plan                 Plan     @default(TRIAL)
+  billingCycle         String   @default("monthly")
+  stripeCustomerId     String?  @unique
+  stripeSubscriptionId String?
+  trialEndsAt          DateTime?
+  billingPeriodStart   DateTime?
+  billingPeriodEnd     DateTime?
+
+  // Overage Settings
+  overageEnabled     Boolean @default(false)
+  overageCapCents    Int     @default(15000) // $150 default cap
+  overageUsedCents   Int     @default(0)     // Current overage charges this period
+
+  // Usage Limits
+  monthlyCallMinutes Int @default(1000)
+  monthlyAIMinutes   Int @default(300)
+  maxUsers           Int @default(2)
+  maxPhoneNumbers    Int @default(1)
+
+  // Current Usage
+  usedCallMinutes  Int       @default(0)
+  usedAIMinutes    Int       @default(0)
+  usageResetAt     DateTime?
+  aiGraceStartedAt DateTime? // When AI grace period started (48hr)
+
+  // Add-on Pool (from purchased add-ons)
+  addonCallMinutes     Int @default(0)
+  addonAIMinutes       Int @default(0)
+  usedAddonCallMinutes Int @default(0)
+  usedAddonAIMinutes   Int @default(0)
+
+  // Integrations
+  slackWebhookUrl    String?
+  teamsWebhookUrl    String?
+  notifyOnNewLead    Boolean @default(true)
+  notifyOnMissedCall Boolean @default(true)
+
+  // BYO Keys (Enterprise Feature)
+  byoKeysEnabled       Boolean @default(false)
+  byoOpenaiKey         String? // Encrypted
+  byoElevenlabsKey     String? // Encrypted
+  byoDeepgramKey       String? // Encrypted
+  byoTwilioAccountSid  String?
+  byoTwilioAuthToken   String? // Encrypted
+  byoTwilioNumber      String?
+  byoKeysValidatedAt   DateTime?
+
+  // Data Retention Settings
+  retentionCallDays       Int      @default(90)   // Days to keep call logs
+  retentionTranscriptDays Int      @default(90)   // Days to keep transcripts
+  retentionRecordingDays  Int      @default(30)   // Days to keep recordings
+  retentionLeadDays       Int      @default(365)  // Days to keep closed leads
+  retentionAuditDays      Int      @default(365)  // Days to keep audit logs
+  retentionEnabled        Boolean  @default(true)
+  lastCleanupAt           DateTime?
+  dataExportRequests      DataExportRequest[]
+
+  // Relations
+  users           User[]
+  memberships     UserOrganization[]
+  callLogs        CallLog[]
+  leads           Lead[]
+  transcripts     Transcript[]
+  phoneNumbers    PhoneNumber[]
+  usageLogs       UsageLog[]
+  auditLogs       AuditLog[]
+  invoices        Invoice[]
+  usageAlerts     UsageAlert[]
+  apiKeys         ApiKey[]
+  addonPurchases  AddOnPurchase[]
+
+  @@index([slug])
+  @@index([status])
+}
+
+// ============================================================================
+// USER
+// ============================================================================
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String
+  name         String
+  phone        String?
+  avatar       String?
+  status       UserStatus @default(ACTIVE)
+
+  twilioIdentity String? @unique
+
+  timezone           String  @default("America/New_York")
+  language           String  @default("en")
+  emailNotifications Boolean @default(true)
+  smsNotifications   Boolean @default(false)
+
+  lastLoginAt          DateTime?
+  lastLoginIp          String?
+  mfaEnabled           Boolean   @default(false)
+  mfaSecret            String?
+  passwordResetToken   String?
+  passwordResetExpires DateTime?
+
+  // Current active organization (for session)
+  currentOrgId String?
+
+  // Multi-org memberships
+  memberships UserOrganization[]
+
+  // Legacy: Direct org relation (kept for backwards compat, will migrate)
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  assignedLeads Lead[]    @relation("AssignedAgent")
+  callsHandled  CallLog[] @relation("HandledBy")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([email])
+  @@index([currentOrgId])
+}
+
+// ============================================================================
+// USER-ORGANIZATION MEMBERSHIP (Multi-org support)
+// ============================================================================
+
+model UserOrganization {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  role      UserRole @default(AGENT)
+  isPrimary Boolean  @default(false) // User's primary/default org
+
+  invitedBy   String?
+  invitedAt   DateTime @default(now())
+  acceptedAt  DateTime?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, organizationId])
+  @@index([userId])
+  @@index([organizationId])
+}
+
+// ============================================================================
+// CALLS
+// ============================================================================
+
+model CallLog {
+  id      String        @id @default(cuid())
+  callSid String        @unique
+
+  direction  CallDirection
+  fromNumber String
+  toNumber   String
+  status     CallStatus
+  duration   Int           @default(0)
+  waitTime   Int?
+
+  recordingUrl      String?
+  recordingSid      String?
+  recordingDuration Int?
+
+  handledByAI        Boolean @default(false)
+  aiConfidence       Float?
+  transferredToHuman Boolean @default(false)
+  transferReason     String?
+
+  sentiment      String?
+  sentimentScore Float?
+  topics         String[]
+
+  cost         Float?
+  twilioPrice  Float?
+  aiTokensUsed Int?
+
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+
+  phoneNumberId String?
+  phoneNumber   PhoneNumber? @relation(fields: [phoneNumberId], references: [id])
+
+  handledById String?
+  handledBy   User?  @relation("HandledBy", fields: [handledById], references: [id])
+
+  transcript Transcript?
+  lead       Lead?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([callSid])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model PhoneNumber {
+  id           String  @id @default(cuid())
+  number       String  @unique
+  friendlyName String?
+  twilioSid    String? @unique
+  capabilities Json?
+
+  routeToAI    Boolean @default(true)
+  routeToUser  String?
+  routeToQueue String?
+
+  greeting   String?
+  voiceId    String?
+  callFlowId String?
+
+  status String @default("active")
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  callLogs CallLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([number])
+}
+
+// ============================================================================
+// TRANSCRIPTS
+// ============================================================================
+
+model Transcript {
+  id      String @id @default(cuid())
+  callSid String @unique
+
+  fullText String @db.Text
+  messages Json
+
+  summary        String? @db.Text
+  sentiment      String?
+  sentimentScore Float?
+  keywords       String[]
+  topics         String[]
+  actionItems    Json?
+
+  primaryIntent    String?
+  intentConfidence Float?
+  entities         Json?
+
+  call CallLog @relation(fields: [callSid], references: [callSid])
+
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([callSid])
+}
+
+// ============================================================================
+// LEADS
+// ============================================================================
+
+model Lead {
+  id      String @id @default(cuid())
+  callSid String @unique
+
+  name     String
+  phone    String
+  email    String?
+  company  String?
+  jobTitle String?
+  website  String?
+
+  address    String?
+  city       String?
+  state      String?
+  country    String?
+  postalCode String?
+
+  reason                String
+  serviceInterest       String?
+  preferredCallbackTime String?
+  appointmentDate       String?
+  appointmentTime       String?
+  urgency               LeadUrgency @default(MEDIUM)
+  referralSource        String?
+  notes                 String?     @db.Text
+
+  score       Int      @default(0)
+  temperature LeadTemp @default(WARM)
+
+  status     LeadStatus @default(NEW)
+  stage      String     @default("new")
+  lostReason String?
+
+  estimatedValue Float?
+  actualValue    Float?
+  currency       String @default("USD")
+
+  assignedToId String?
+  assignedTo   User?     @relation("AssignedAgent", fields: [assignedToId], references: [id])
+  assignedAt   DateTime?
+
+  source       String @default("phone")
+  campaign     String?
+  medium       String?
+  customFields Json?
+
+  call CallLog @relation(fields: [callSid], references: [callSid])
+
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  convertedAt DateTime?
+  closedAt    DateTime?
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([phone])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// USAGE TRACKING
+// ============================================================================
+
+model UsageLog {
+  id String @id @default(cuid())
+
+  type     String // call_minutes, ai_minutes, sms, storage
+  quantity Float
+  unit     String // minutes, messages, bytes
+  unitCost Float?
+  totalCost Float?
+
+  periodStart DateTime
+  periodEnd   DateTime
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// AUDIT LOGS
+// ============================================================================
+
+model AuditLog {
+  id String @id @default(cuid())
+
+  actorType  String  // user, system, api
+  actorId    String?
+  actorEmail String?
+
+  action     String
+  entityType String
+  entityId   String?
+
+  oldValues String? @db.Text
+  newValues String? @db.Text
+  metadata  String? @db.Text
+
+  ipAddress String?
+  userAgent String? @db.Text
+
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([actorId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// INVOICES
+// ============================================================================
+
+model Invoice {
+  id String @id @default(cuid())
+
+  stripeInvoiceId String @unique
+  amount          Int // In cents
+  currency        String @default("usd")
+  status          String // draft, open, paid, void, uncollectible
+
+  periodStart DateTime
+  periodEnd   DateTime
+  paidAt      DateTime?
+
+  pdfUrl    String?
+  hostedUrl String?
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+// ============================================================================
+// USAGE ALERTS
+// ============================================================================
+
+model UsageAlert {
+  id String @id @default(cuid())
+
+  type     String // usage_warning_80, usage_warning_90, etc.
+  title    String
+  message  String
+  severity String @default("info") // info, warning, error
+
+  data String? @db.Text // JSON data
+
+  dismissed   Boolean   @default(false)
+  dismissedAt DateTime?
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([type])
+  @@index([dismissed])
+}
+
+// ============================================================================
+// API KEYS (Platform API access for Enterprise)
+// ============================================================================
+
+model ApiKey {
+  id String @id @default(cuid())
+
+  name        String
+  keyHash     String   @unique // Hashed key (only show once on creation)
+  keyPrefix   String   // First 8 chars for identification (hk_live_...)
+  
+  permissions String[] // read, write, calls, leads, etc.
+  
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  
+  createdById String?
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([keyPrefix])
+}
+
+// ============================================================================
+// DATA EXPORT REQUEST (GDPR/CCPA Compliance)
+// ============================================================================
+
+model DataExportRequest {
+  id String @id @default(cuid())
+
+  type      String   // full_export, calls_only, leads_only, transcripts_only
+  status    String   @default("pending") // pending, processing, completed, failed, expired
+  format    String   @default("json") // json, csv, zip
+  
+  fileUrl   String?  // Download URL when completed
+  fileSize  Int?     // Size in bytes
+  expiresAt DateTime? // When download link expires
+  
+  requestedBy   String
+  requestedAt   DateTime @default(now())
+  completedAt   DateTime?
+  errorMessage  String?
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+// ============================================================================
+// CLEANUP LOG (Audit trail for data deletion)
+// ============================================================================
+
+model CleanupLog {
+  id String @id @default(cuid())
+
+  type           String   // scheduled, manual, gdpr_request
+  dataType       String   // calls, transcripts, recordings, leads, audit_logs
+  recordsDeleted Int      @default(0)
+  bytesFreed     BigInt   @default(0)
+  
+  cutoffDate     DateTime // Data older than this was deleted
+  
+  status         String   @default("completed") // completed, partial, failed
+  errorMessage   String?
+  
+  triggeredBy    String?  // user_id or "system"
+  
+  organizationId String?  // null for system-wide cleanup
+  
+  createdAt DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// ADD-ON PURCHASES (One-time minute packs)
+// ============================================================================
+
+enum AddOnType {
+  CALL_MINUTES
+  AI_MINUTES
+  BUNDLE
+}
+
+enum AddOnStatus {
+  ACTIVE      // Has remaining minutes
+  EXHAUSTED   // All minutes used
+  EXPIRED     // Expired (if we add expiration)
+  REFUNDED    // Refunded by admin
+}
+
+model AddOnPurchase {
+  id String @id @default(cuid())
+
+  // What they bought
+  type        AddOnType
+  productId   String      // e.g., "call_boost_1000", "ai_boost_500", "growth_bundle"
+  productName String
+  
+  // Minutes included
+  callMinutes Int @default(0)
+  aiMinutes   Int @default(0)
+  
+  // Minutes used from this pack
+  usedCallMinutes Int @default(0)
+  usedAiMinutes   Int @default(0)
+  
+  // Payment
+  priceCents        Int
+  stripePaymentId   String?   // Stripe PaymentIntent ID
+  stripeInvoiceId   String?   // Stripe Invoice ID (if any)
+  
+  // Status
+  status AddOnStatus @default(ACTIVE)
+  
+  // Organization
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  // Timestamps
+  purchasedAt DateTime @default(now())
+  exhaustedAt DateTime?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([purchasedAt])
+}

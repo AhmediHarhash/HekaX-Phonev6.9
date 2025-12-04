@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(node test-puppeteer.js:*)",
+      "Bash(dir /s /b \"C:\\Users\\Ibrahim\\Desktop\\workspace\\backend\\*.ts\")",
+      "Bash(findstr:*)",
+      "Bash(npx prisma:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(dir:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

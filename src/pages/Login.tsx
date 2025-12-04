@@ -5,7 +5,8 @@
 import { useState } from 'react';
 import { Phone, Mail, Lock, Eye, EyeOff, User, Building2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { api } from '../utils/api';
+import { authApi } from '../utils/api';
+import { STORAGE_KEYS } from '../utils/constants';
 
 export function LoginPage() {
   const { login } = useAuth();
@@ -29,14 +30,14 @@ export function LoginPage() {
     try {
       if (isSignup) {
         // Register new account
-        const data = await api.post<{ token: string }>('/api/auth/register', {
-          email,
-          password,
-          name,
-          orgName,
-        });
-        // Store token and reload
-        localStorage.setItem('token', data.token);
+        const data = await authApi.register(orgName, email, password, name);
+
+        // Store auth data using consistent keys
+        localStorage.setItem(STORAGE_KEYS.TOKEN, data.token);
+        localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(data.user));
+        localStorage.setItem(STORAGE_KEYS.ORG, JSON.stringify(data.organization));
+
+        // Reload to initialize app state
         window.location.href = '/';
       } else {
         // Login

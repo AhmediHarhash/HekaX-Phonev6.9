@@ -438,11 +438,11 @@ class AIReceptionist {
   }
 
   // ===========================================================================
-  // TRANSFER WITH HOLD MUSIC
+  // TRANSFER TO HUMAN
   // ===========================================================================
-  async transferToHumanWithMusic() {
+  async transferToHuman() {
     try {
-      console.log("🔁 Transferring to human with hold music...");
+      console.log("🔁 Transferring to human agent...");
       this.transferredToHuman = true;
 
       // Close Deepgram connection first
@@ -455,24 +455,21 @@ class AIReceptionist {
       this.deepgramReady = false;
 
       const callerId = this.toNumber || process.env.TWILIO_NUMBER;
-      const transferUrl = `${process.env.PUBLIC_BASE_URL}/twilio/transfer/initiate?callerId=${encodeURIComponent(callerId)}`;
 
-      // Redirect the call to a transfer endpoint instead of updating TwiML directly
-      // This works better with media streams
+      // Simple direct dial to web client - this is what worked in v5
       await this.twilioClient.calls(this.callSid).update({
-        url: transferUrl,
-        method: "POST",
+        twiml: `<Response><Dial callerId="${callerId}"><Client>web-user</Client></Dial></Response>`,
       });
 
-      console.log("✅ Transfer initiated - redirecting to:", transferUrl);
+      console.log("✅ Transfer initiated to web-user");
     } catch (err) {
       console.error("❌ Transfer error:", err.message);
-      // Don't try to speak - the call state might be unstable
     }
   }
 
-  async transferToHuman() {
-    return this.transferToHumanWithMusic();
+  // Alias for compatibility
+  async transferToHumanWithMusic() {
+    return this.transferToHuman();
   }
 
   // ===========================================================================

@@ -81,17 +81,20 @@ class AIReceptionist {
     this.hasSpeechInBuffer = false; // Whether buffer contains any speech
 
     // Tuned thresholds for natural conversation
-    this.SILENCE_THRESHOLD_MS = 1500; // 1.5 seconds - wait for caller to finish
-    this.MIN_SPEECH_DURATION_MS = 500; // Minimum speech duration to process
+    this.SILENCE_THRESHOLD_MS = 1200; // 1.2 seconds - wait for caller to finish
+    this.MIN_SPEECH_DURATION_MS = 300; // Minimum speech duration to process
     this.MIN_AUDIO_LENGTH = 1600; // Minimum ~0.1 seconds of audio
-    this.SPEECH_THRESHOLD = 45; // Audio level threshold (raised - phone noise is 10-30)
-    this.SPEECH_CONFIRM_CHUNKS = 5; // Need 5 consecutive chunks above threshold to start
+    this.SPEECH_THRESHOLD = 25; // Audio level threshold (balanced for phone quality)
+    this.SPEECH_CONFIRM_CHUNKS = 3; // Need 3 consecutive chunks above threshold to start
 
     // Speech detection state
     this.consecutiveSpeechChunks = 0;
     this.consecutiveSilenceChunks = 0;
-    this.SILENCE_CONFIRM_CHUNKS = 50; // ~1 second of silence to confirm end of speech
+    this.SILENCE_CONFIRM_CHUNKS = 40; // ~0.8 seconds of silence to confirm end of speech
     this.inSpeechSegment = false; // Track if we're currently in a speech segment
+
+    // Audio level tracking for debugging
+    this.recentLevels = [];
 
     // =========================================================================
     // CONVERSATION TRACKING
@@ -150,30 +153,32 @@ class AIReceptionist {
   startSilenceDetection() {
     this.silenceTimer = setInterval(async () => {
       const timeSinceLastSpeech = Date.now() - this.lastSpeechTime;
-      const hasSufficientAudio = this.audioBuffer.length > 0 && this.hasSpeechInBuffer;
+      const hasAudio = this.audioBuffer.length > 0;
       const speechDuration = this.speechStartTime ? (this.lastSpeechTime - this.speechStartTime) : 0;
 
-      // Debug log every 3 seconds
-      if (Date.now() % 3000 < 500) {
-        console.log(`🔍 buffer=${this.audioBuffer.length}, silence=${Math.round(timeSinceLastSpeech/1000)}s, hasSpeech=${this.hasSpeechInBuffer}, speaking=${this.isSpeaking}`);
+      // Debug log every 2 seconds
+      if (Date.now() % 2000 < 250) {
+        console.log(`🔍 buffer=${this.audioBuffer.length}, silence=${Math.round(timeSinceLastSpeech/1000)}s, hasSpeech=${this.hasSpeechInBuffer}, inSpeech=${this.inSpeechSegment}, speaking=${this.isSpeaking}, processing=${this.isProcessing}`);
       }
 
       // Process when:
-      // 1. We have audio with speech in it
-      // 2. Enough silence has passed (caller stopped talking)
-      // 3. Not already processing or speaking
-      // 4. Speech was long enough to be meaningful
+      // 1. We have audio in buffer
+      // 2. We detected speech at some point (hasSpeechInBuffer)
+      // 3. Enough silence has passed (caller stopped talking)
+      // 4. Not currently in a speech segment
+      // 5. Not already processing or speaking
       if (
-        hasSufficientAudio &&
+        hasAudio &&
+        this.hasSpeechInBuffer &&
         timeSinceLastSpeech > this.SILENCE_THRESHOLD_MS &&
+        !this.inSpeechSegment &&
         !this.isProcessing &&
-        !this.isSpeaking &&
-        speechDuration > this.MIN_SPEECH_DURATION_MS
+        !this.isSpeaking
       ) {
-        console.log(`🎯 Caller finished speaking (${Math.round(speechDuration/1000)}s speech, ${Math.round(timeSinceLastSpeech/1000)}s silence)`);
+        console.log(`🎯 Processing: ${this.audioBuffer.length} chunks, ${Math.round(speechDuration/1000)}s speech, ${Math.round(timeSinceLastSpeech/1000)}s silence`);
         await this.processBufferedAudio();
       }
-    }, 200); // Check more frequently for responsiveness
+    }, 150); // Check frequently for responsiveness
   }
 
   // ===========================================================================
@@ -191,6 +196,10 @@ class AIReceptionist {
     const audioLevel = this.getAudioLevel(audioData);
     const isSpeech = audioLevel > this.SPEECH_THRESHOLD;
 
+    // Track recent levels for debugging
+    this.recentLevels.push(audioLevel);
+    if (this.recentLevels.length > 50) this.recentLevels.shift();
+
     if (isSpeech) {
       this.consecutiveSpeechChunks++;
       this.consecutiveSilenceChunks = 0;
@@ -200,7 +209,8 @@ class AIReceptionist {
         if (!this.inSpeechSegment) {
           this.inSpeechSegment = true;
           this.speechStartTime = Date.now();
-          console.log("🗣️ Caller started speaking...");
+          const avgLevel = Math.round(this.recentLevels.reduce((a,b) => a+b, 0) / this.recentLevels.length);
+          console.log(`🗣️ Caller started speaking (level=${audioLevel}, avg=${avgLevel})`);
         }
         this.lastSpeechTime = Date.now();
         this.hasSpeechInBuffer = true;
@@ -211,16 +221,19 @@ class AIReceptionist {
 
       // Only mark end of speech after sustained silence
       if (this.inSpeechSegment && this.consecutiveSilenceChunks >= this.SILENCE_CONFIRM_CHUNKS) {
-        console.log("🔇 Caller stopped speaking (silence detected)");
+        const avgLevel = Math.round(this.recentLevels.reduce((a,b) => a+b, 0) / this.recentLevels.length);
+        console.log(`🔇 Caller stopped speaking (level=${audioLevel}, avg=${avgLevel})`);
         this.inSpeechSegment = false;
-        // Don't update lastSpeechTime anymore - it stays at last actual speech
       }
     }
 
-    // Log occasionally
-    if (this.audioBuffer.length % 150 === 0) {
+    // Log more frequently for debugging
+    if (this.audioBuffer.length % 100 === 0) {
       const silenceMs = Date.now() - this.lastSpeechTime;
-      console.log(`🎤 Buffered: ${this.audioBuffer.length} chunks, level=${audioLevel}, inSpeech=${this.inSpeechSegment}, silence=${Math.round(silenceMs/1000)}s`);
+      const avgLevel = this.recentLevels.length > 0
+        ? Math.round(this.recentLevels.reduce((a,b) => a+b, 0) / this.recentLevels.length)
+        : 0;
+      console.log(`🎤 buffer=${this.audioBuffer.length}, level=${audioLevel}, avg=${avgLevel}, inSpeech=${this.inSpeechSegment}, hasSpeech=${this.hasSpeechInBuffer}, silence=${Math.round(silenceMs/1000)}s`);
     }
   }
 
@@ -244,6 +257,9 @@ class AIReceptionist {
 
     const combinedAudio = Buffer.concat(this.audioBuffer);
     const chunkCount = this.audioBuffer.length;
+    const durationSec = (chunkCount * 20) / 1000; // Each chunk ~20ms
+
+    console.log(`🎯 Processing audio: ${chunkCount} chunks, ${combinedAudio.length} bytes, ~${durationSec.toFixed(1)}s`);
 
     // Reset buffer state
     this.audioBuffer = [];

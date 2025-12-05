@@ -90,28 +90,10 @@ router.post(
       console.log("📞 Routing to:", { orgId: org?.id, aiEnabled, clientIdentity });
 
       if (aiEnabled) {
-        const callSid = req.body.CallSid;
-
-        // Start call recording via API (runs parallel to the call)
-        if (callSid) {
-          const twilioClient = twilio(
-            process.env.TWILIO_ACCOUNT_SID,
-            process.env.TWILIO_AUTH_TOKEN
-          );
-
-          twilioClient.calls(callSid)
-            .recordings.create({
-              recordingStatusCallback: `${process.env.PUBLIC_BASE_URL}/twilio/recording/callback`,
-              recordingStatusCallbackEvent: ["completed"],
-              recordingChannels: "dual",
-            })
-            .then((recording) => {
-              console.log("🎙️ Recording started:", recording.sid);
-            })
-            .catch((err) => {
-              console.error("⚠️ Recording start error:", err.message);
-            });
-        }
+        // Note: Twilio doesn't support recording for <Connect><Stream> calls
+        // The AI receptionist creates its own transcript from the conversation
+        // For call recordings, we would need to use Twilio's Recordings API post-call
+        // or use a different architecture (dial to conference with recording)
 
         twiml.say(
           { voice: "Polly.Amy" },

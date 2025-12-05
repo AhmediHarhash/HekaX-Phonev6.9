@@ -81,16 +81,17 @@ class AIReceptionist {
     this.hasSpeechInBuffer = false; // Whether buffer contains any speech
 
     // Tuned thresholds for natural conversation
-    this.SILENCE_THRESHOLD_MS = 1200; // 1.2 seconds - wait for caller to finish
-    this.MIN_SPEECH_DURATION_MS = 300; // Minimum speech duration to process
+    this.SILENCE_THRESHOLD_MS = 1500; // 1.5 seconds - wait for caller to finish
+    this.MIN_SPEECH_DURATION_MS = 500; // Minimum speech duration to process
     this.MIN_AUDIO_LENGTH = 1600; // Minimum ~0.1 seconds of audio
-    this.SPEECH_THRESHOLD = 15; // Audio level threshold (lowered for sensitivity)
-    this.SPEECH_CONFIRM_CHUNKS = 3; // Need 3 consecutive chunks above threshold
+    this.SPEECH_THRESHOLD = 45; // Audio level threshold (raised - phone noise is 10-30)
+    this.SPEECH_CONFIRM_CHUNKS = 5; // Need 5 consecutive chunks above threshold to start
 
     // Speech detection state
     this.consecutiveSpeechChunks = 0;
     this.consecutiveSilenceChunks = 0;
-    this.SILENCE_CONFIRM_CHUNKS = 15; // ~300ms of silence to confirm end of speech
+    this.SILENCE_CONFIRM_CHUNKS = 50; // ~1 second of silence to confirm end of speech
+    this.inSpeechSegment = false; // Track if we're currently in a speech segment
 
     // =========================================================================
     // CONVERSATION TRACKING
@@ -196,7 +197,8 @@ class AIReceptionist {
 
       // Confirm speech after consecutive chunks (debounce)
       if (this.consecutiveSpeechChunks >= this.SPEECH_CONFIRM_CHUNKS) {
-        if (!this.speechStartTime) {
+        if (!this.inSpeechSegment) {
+          this.inSpeechSegment = true;
           this.speechStartTime = Date.now();
           console.log("🗣️ Caller started speaking...");
         }
@@ -206,11 +208,19 @@ class AIReceptionist {
     } else {
       this.consecutiveSilenceChunks++;
       this.consecutiveSpeechChunks = 0;
+
+      // Only mark end of speech after sustained silence
+      if (this.inSpeechSegment && this.consecutiveSilenceChunks >= this.SILENCE_CONFIRM_CHUNKS) {
+        console.log("🔇 Caller stopped speaking (silence detected)");
+        this.inSpeechSegment = false;
+        // Don't update lastSpeechTime anymore - it stays at last actual speech
+      }
     }
 
     // Log occasionally
     if (this.audioBuffer.length % 150 === 0) {
-      console.log(`🎤 Buffered: ${this.audioBuffer.length} chunks, level=${audioLevel}, speech=${this.hasSpeechInBuffer}`);
+      const silenceMs = Date.now() - this.lastSpeechTime;
+      console.log(`🎤 Buffered: ${this.audioBuffer.length} chunks, level=${audioLevel}, inSpeech=${this.inSpeechSegment}, silence=${Math.round(silenceMs/1000)}s`);
     }
   }
 
@@ -458,10 +468,13 @@ Text: "${userText}"`,
       console.log("🔊 Speaking:", text.substring(0, 60) + (text.length > 60 ? "..." : ""));
       this.isSpeaking = true;
 
-      // Reset speech detection for fresh listening after AI speaks
-      this.lastSpeechTime = Date.now();
+      // Clear buffer and reset speech detection before speaking
+      this.audioBuffer = [];
       this.speechStartTime = null;
       this.hasSpeechInBuffer = false;
+      this.inSpeechSegment = false;
+      this.consecutiveSpeechChunks = 0;
+      this.consecutiveSilenceChunks = 0;
 
       const safetyTimeout = setTimeout(() => {
         if (this.isSpeaking) {
@@ -482,7 +495,8 @@ Text: "${userText}"`,
       // Brief pause before listening again
       setTimeout(() => {
         this.isSpeaking = false;
-        this.lastSpeechTime = Date.now(); // Reset so we wait for new speech
+        this.lastSpeechTime = Date.now(); // Reset timer for new speech detection
+        this.audioBuffer = []; // Clear any audio that came during speaking
         console.log("🎤 Listening...");
       }, 300);
     }

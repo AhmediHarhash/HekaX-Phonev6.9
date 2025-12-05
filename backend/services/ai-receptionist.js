@@ -340,41 +340,21 @@ class AIReceptionist {
   }
 
   // ===========================================================================
-  // CONVERSATION PROCESSING
+  // CONVERSATION PROCESSING (JSON-based)
   // ===========================================================================
   async processUserInput(userText) {
-    if (this.isProcessing && this.conversationHistory.length > 0) return;
-    this.isProcessing = true;
     this.turnCount++;
 
     if (this.turnCount > this.maxTurns) {
       await this.speak("Thank you for your time. I'll make sure your information is passed to our team. Have a great day!");
-      this.isProcessing = false;
       return;
     }
 
     try {
+      // Add user message to history (just the text, not JSON)
       this.conversationHistory.push({ role: "user", content: userText });
 
-      // Extract caller info
-      await this.extractCallerInfo(userText);
-
-      // Check for transfer request
-      if ((this.callerInfo.wantsHumanAgent || this.wantsHumanTransfer) && !this.transferredToHuman) {
-        this.transferredToHuman = true;
-        await this.speak("Absolutely, let me connect you with a team member right away. Please hold for just a moment.");
-
-        setTimeout(() => {
-          this.transferToHumanWithMusic().catch(err => {
-            console.error("❌ Transfer failed:", err.message);
-          });
-        }, 800);
-
-        this.isProcessing = false;
-        return;
-      }
-
-      // Generate AI response
+      // Generate AI response with JSON format
       console.log("🧠 Generating response...");
       const response = await this.openai.chat.completions.create({
         model: "gpt-5.1",
@@ -382,100 +362,117 @@ class AIReceptionist {
           { role: "system", content: this.getSystemPrompt() },
           ...this.conversationHistory,
         ],
-        max_completion_tokens: 150,
+        max_completion_tokens: 250,
         temperature: 0.7,
-      });
-
-      const aiResponse = response.choices[0].message.content;
-      console.log("🤖 AI:", aiResponse);
-
-      this.conversationHistory.push({ role: "assistant", content: aiResponse });
-      this.transcript.push({
-        role: "assistant",
-        content: aiResponse,
-        timestamp: new Date().toISOString(),
-      });
-
-      await this.speak(aiResponse);
-    } catch (error) {
-      console.error("❌ Process error:", error.message);
-      await this.speak("I apologize, could you please repeat that?");
-    } finally {
-      this.isProcessing = false;
-    }
-  }
-
-  async extractCallerInfo(userText) {
-    try {
-      const response = await this.openai.chat.completions.create({
-        model: "gpt-5-mini",
-        messages: [
-          {
-            role: "system",
-            content: `Extract caller information from the text. Return JSON only:
-{
-  "name": "extracted name or null",
-  "email": "extracted email or null",
-  "company": "company name or null",
-  "reason": "reason for calling or null",
-  "serviceInterest": "which service interests them or null",
-  "preferredCallbackTime": "preferred time for callback or null",
-  "appointmentDate": "requested appointment date or null",
-  "appointmentTime": "requested appointment time or null",
-  "urgency": "LOW/MEDIUM/HIGH/CRITICAL based on tone and need, or null",
-  "referralSource": "how they heard about us or null",
-  "wantsHumanAgent": true or false
-}
-Rules:
-- "wantsHumanAgent": true if caller asks for human, real person, agent, representative, someone, transfer, speak to someone
-- Only extract clearly stated information`,
-          },
-          {
-            role: "user",
-            content: `Current info: ${JSON.stringify(this.callerInfo)}
-Text: "${userText}"`,
-          },
-        ],
-        max_completion_tokens: 150,
         response_format: { type: "json_object" },
       });
 
-      let extracted;
       const rawContent = response.choices[0].message.content;
 
+      // Safe JSON parse with fallback
+      let aiJson;
       try {
-        extracted = JSON.parse(rawContent);
+        aiJson = JSON.parse(rawContent);
       } catch (parseError) {
-        console.warn("⚠️ JSON parse failed, raw:", rawContent?.substring(0, 100));
-        // Fallback: check for human transfer keywords manually
+        console.warn("⚠️ JSON parse failed, using raw as reply:", rawContent?.substring(0, 100));
+        // Fallback: treat raw content as plain reply
         const lowerText = userText.toLowerCase();
         const humanKeywords = ["human", "person", "agent", "representative", "transfer", "speak to someone", "real person"];
-        const wantsHuman = humanKeywords.some(kw => lowerText.includes(kw));
-        extracted = { wantsHumanAgent: wantsHuman };
+        const needsHuman = humanKeywords.some(kw => lowerText.includes(kw));
+        aiJson = {
+          reply: rawContent || "I apologize, could you please repeat that?",
+          intent: "other",
+          needs_human: needsHuman,
+          slots: {},
+          end_call: false,
+          urgency: "MEDIUM"
+        };
       }
 
-      for (const key of Object.keys(this.callerInfo)) {
-        if (extracted[key] !== undefined && extracted[key] !== null && extracted[key] !== "") {
-          this.callerInfo[key] = extracted[key];
+      const reply = aiJson.reply || "I apologize, could you please repeat that?";
+      console.log("🤖 AI reply:", reply);
+      if (aiJson.intent) console.log("📋 Intent:", aiJson.intent, "| needs_human:", aiJson.needs_human);
+
+      // Apply extracted slots to callerInfo
+      this.applyAIResult(aiJson);
+
+      // Add only the reply to conversation history (not the full JSON)
+      this.conversationHistory.push({ role: "assistant", content: reply });
+      this.transcript.push({
+        role: "assistant",
+        content: reply,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Handle human transfer request
+      if (aiJson.needs_human && !this.transferredToHuman) {
+        this.transferredToHuman = true;
+        await this.speak(reply);
+
+        setTimeout(() => {
+          this.transferToHumanWithMusic().catch(err => {
+            console.error("❌ Transfer failed:", err.message);
+          });
+        }, 800);
+        return;
+      }
+
+      // Handle end call
+      if (aiJson.end_call) {
+        await this.speak(reply);
+        console.log("📞 AI decided to end call");
+        return;
+      }
+
+      // Normal response
+      await this.speak(reply);
+    } catch (error) {
+      console.error("❌ Process error:", error.message);
+      await this.speak("I apologize, could you please repeat that?");
+    }
+  }
+
+  // ===========================================================================
+  // APPLY AI RESULT TO CALLER INFO
+  // ===========================================================================
+  applyAIResult(aiJson) {
+    // Map slots to callerInfo
+    if (aiJson.slots && typeof aiJson.slots === "object") {
+      const slotMapping = {
+        name: "name",
+        email: "email",
+        company: "company",
+        reason: "reason",
+        service_interest: "serviceInterest",
+        callback_time: "preferredCallbackTime",
+        appointment_date: "appointmentDate",
+        appointment_time: "appointmentTime",
+        referral_source: "referralSource"
+      };
+
+      for (const [slotKey, infoKey] of Object.entries(slotMapping)) {
+        if (aiJson.slots[slotKey] && aiJson.slots[slotKey] !== null) {
+          this.callerInfo[infoKey] = aiJson.slots[slotKey];
+          console.log(`📝 Slot: ${infoKey} = ${aiJson.slots[slotKey]}`);
         }
       }
+    }
 
-      if (extracted.wantsHumanAgent === true) {
-        this.wantsHumanTransfer = true;
-        console.log("🙋 Caller wants human transfer");
-      }
+    // Set urgency if provided
+    if (aiJson.urgency && ["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(aiJson.urgency)) {
+      this.callerInfo.urgency = aiJson.urgency;
+    }
 
-      if (this.callerInfo.name) {
-        console.log("📋 Caller identified:", this.callerInfo.name);
-      }
-    } catch (error) {
-      console.error("⚠️ Extraction error:", error.message);
-      // Even on total failure, check for human transfer keywords
-      const lowerText = userText.toLowerCase();
-      if (lowerText.includes("human") || lowerText.includes("person") || lowerText.includes("transfer")) {
-        this.wantsHumanTransfer = true;
-        console.log("🙋 Caller wants human transfer (fallback detection)");
-      }
+    // Set human transfer flag
+    if (aiJson.needs_human === true) {
+      this.wantsHumanTransfer = true;
+      this.callerInfo.wantsHumanAgent = true;
+      console.log("🙋 Caller wants human transfer");
+    }
+
+    // Log if we identified the caller
+    if (this.callerInfo.name) {
+      console.log("📋 Caller identified:", this.callerInfo.name);
     }
   }
 
@@ -670,7 +667,7 @@ Text: "${userText}"`,
   }
 
   // ===========================================================================
-  // SYSTEM PROMPT
+  // SYSTEM PROMPT (JSON Response Format)
   // ===========================================================================
   getSystemPrompt() {
     return `You are the professional AI receptionist for ${this.orgName}.
@@ -681,30 +678,50 @@ VOICE PERSONA:
 - Use conversational language, not robotic phrases
 - Show empathy and understanding
 
-RESPONSE RULES:
-- Keep responses to 1-2 SHORT sentences maximum
-- Never use more than 30 words per response
-- Ask ONE question at a time
-- Use the caller's name once you know it
-- Never use emojis, asterisks, or special characters
-- Never say "I'm an AI" - just be helpful
+RESPONSE FORMAT:
+You MUST respond with valid JSON in this exact format:
+{
+  "reply": "Your spoken response to the caller (1-2 short sentences, max 30 words)",
+  "intent": "greeting|inquiry|appointment|complaint|transfer_request|callback|other",
+  "needs_human": false,
+  "slots": {
+    "name": null,
+    "email": null,
+    "company": null,
+    "reason": null,
+    "service_interest": null,
+    "callback_time": null,
+    "appointment_date": null,
+    "appointment_time": null,
+    "referral_source": null
+  },
+  "end_call": false,
+  "urgency": "LOW|MEDIUM|HIGH|CRITICAL"
+}
+
+RULES FOR JSON FIELDS:
+- "reply": Your natural spoken response. Keep it short (1-2 sentences). No emojis or special characters.
+- "intent": Classify what the caller wants.
+- "needs_human": Set to true ONLY if caller explicitly asks for human/agent/representative/transfer/real person.
+- "slots": Extract any information the caller provides. Use null for unknown values. Only fill slots with clearly stated info.
+- "end_call": Set to true when conversation is complete (caller says goodbye, issue resolved, etc.)
+- "urgency": Based on caller's tone and situation.
 
 CONVERSATION FLOW:
 1. If you don't have their name, ask for it naturally
 2. Understand their reason for calling
 3. Gather relevant details (appointments, contact info)
-4. Offer to transfer to a human if they ask or seem frustrated
-5. End calls warmly
+4. If they ask for a human, set needs_human: true and reply with "Let me connect you with a team member right away."
+5. End calls warmly when appropriate
 
-CURRENT CALLER:
+CURRENT CALLER INFO:
 - Phone: ${this.callerInfo.phone || "Unknown"}
 - Name: ${this.callerInfo.name || "Not yet provided"}
 - Company: ${this.callerInfo.company || "Not mentioned"}
 - Reason: ${this.callerInfo.reason || "Not yet stated"}
 - Call Duration: ${Math.round((Date.now() - this.callStartTime) / 1000)}s
 
-TRANSFER TRIGGERS:
-If caller says any of: "speak to someone", "real person", "human", "transfer", "representative", "agent" - immediately agree to transfer them.`;
+IMPORTANT: Only output valid JSON. No explanations, no markdown, just the JSON object.`;
   }
 
   // ===========================================================================

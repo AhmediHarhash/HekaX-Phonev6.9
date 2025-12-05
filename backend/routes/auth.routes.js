@@ -24,6 +24,7 @@ const {
   authSchemas,
 } = require("../middleware/validation.middleware");
 const twilioService = require("../services/twilio.service");
+const { emailService } = require("../services/email");
 
 const router = express.Router();
 
@@ -39,6 +40,7 @@ function safeUserResponse(user, role) {
     role: role || user.role,
     status: user.status,
     avatar: user.avatar,
+    emailVerified: user.emailVerified || false,
     onboardingCompleted: user.organization?.onboardingCompleted || false,
     organizationCount: user.memberships?.length || 1,
   };
@@ -108,6 +110,11 @@ router.post(
       // Hash password with higher cost
       const passwordHash = await bcrypt.hash(password, 12);
 
+      // Generate email verification tokens
+      const verificationToken = emailService.generateVerificationToken();
+      const verificationCode = emailService.generateVerificationCode();
+      const verificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
       // Create org + user + membership in transaction
       const result = await prisma.$transaction(async (tx) => {
         // Calculate trial end date (7 days from now)
@@ -138,6 +145,10 @@ router.post(
             organizationId: org.id,
             currentOrgId: org.id,
             status: "ACTIVE",
+            emailVerified: false,
+            emailVerificationToken: verificationToken,
+            emailVerificationCode: verificationCode,
+            emailVerificationExpires: verificationExpires,
           },
         });
 
@@ -168,14 +179,28 @@ router.post(
           // User can still use the app, just need to provision later
         });
 
-      // Create token pair
+      // Send verification email (async, don't block registration)
+      emailService.sendVerificationEmail(result.user, verificationToken, verificationCode)
+        .then((emailResult) => {
+          if (emailResult.success) {
+            console.log("✅ Verification email sent to:", result.user.email);
+          } else {
+            console.warn("⚠️ Verification email failed:", emailResult.error);
+          }
+        })
+        .catch((emailErr) => {
+          console.error("⚠️ Verification email error:", emailErr.message);
+        });
+
+      // Create token pair (user can login immediately but will see verification prompt)
       const tokens = createTokenPair(result.user, result.org.id);
 
       console.log(
         "✅ New registration:",
         result.user.email,
         "| Org:",
-        result.org.name
+        result.org.name,
+        "| Email verification pending"
       );
 
       res.status(201).json({
@@ -184,6 +209,8 @@ router.post(
         expiresIn: 3600,
         user: safeUserResponse(result.user, "OWNER"),
         organization: safeOrgResponse(result.org),
+        emailVerificationRequired: true,
+        message: "Please check your email to verify your account",
       });
     } catch (error) {
       console.error("❌ Register error:", error);
@@ -347,6 +374,240 @@ router.get("/me", authMiddleware, (req, res) => {
     user: safeUserResponse(req.user, req.userRole),
     organization: safeOrgResponse(req.user.organization),
   });
+});
+
+// ============================================================================
+// POST /auth/verify-email
+// Verify email using token or code
+// ============================================================================
+
+router.post("/verify-email", async (req, res) => {
+  try {
+    const { token, code, email } = req.body;
+
+    if (!token && !code) {
+      return res.status(400).json({ error: "Verification token or code required" });
+    }
+
+    let user;
+
+    if (token) {
+      // Verify by token (from email link)
+      user = await prisma.user.findFirst({
+        where: {
+          emailVerificationToken: token,
+          emailVerificationExpires: { gte: new Date() },
+        },
+        include: { organization: true },
+      });
+    } else if (code && email) {
+      // Verify by code (manually entered)
+      const normalizedEmail = email.toLowerCase().trim();
+      user = await prisma.user.findFirst({
+        where: {
+          email: normalizedEmail,
+          emailVerificationCode: code,
+          emailVerificationExpires: { gte: new Date() },
+        },
+        include: { organization: true },
+      });
+    }
+
+    if (!user) {
+      return res.status(400).json({ error: "Invalid or expired verification" });
+    }
+
+    if (user.emailVerified) {
+      return res.json({ message: "Email already verified", alreadyVerified: true });
+    }
+
+    // Mark email as verified
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        emailVerified: true,
+        emailVerificationToken: null,
+        emailVerificationCode: null,
+        emailVerificationExpires: null,
+      },
+    });
+
+    console.log("✅ Email verified:", user.email);
+
+    // Send welcome email (async)
+    emailService.sendWelcomeEmail(user, user.organization)
+      .then((result) => {
+        if (result.success) {
+          console.log("✅ Welcome email sent to:", user.email);
+        }
+      })
+      .catch((err) => {
+        console.warn("⚠️ Welcome email failed:", err.message);
+      });
+
+    res.json({
+      message: "Email verified successfully",
+      verified: true,
+    });
+  } catch (error) {
+    console.error("❌ Email verification error:", error);
+    res.status(500).json({ error: "Verification failed" });
+  }
+});
+
+// ============================================================================
+// POST /auth/resend-verification
+// Resend verification email
+// ============================================================================
+
+router.post("/resend-verification", authLimiter, async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: "Email required" });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const user = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+    });
+
+    if (!user) {
+      // Don't reveal if email exists
+      return res.json({ message: "If your email is registered, a verification link has been sent" });
+    }
+
+    if (user.emailVerified) {
+      return res.json({ message: "Email already verified", alreadyVerified: true });
+    }
+
+    // Generate new tokens
+    const verificationToken = emailService.generateVerificationToken();
+    const verificationCode = emailService.generateVerificationCode();
+    const verificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    // Update user with new tokens
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        emailVerificationToken: verificationToken,
+        emailVerificationCode: verificationCode,
+        emailVerificationExpires: verificationExpires,
+      },
+    });
+
+    // Send verification email
+    await emailService.sendVerificationEmail(user, verificationToken, verificationCode);
+
+    console.log("✅ Verification email resent to:", user.email);
+
+    res.json({ message: "Verification email sent" });
+  } catch (error) {
+    console.error("❌ Resend verification error:", error);
+    res.status(500).json({ error: "Failed to resend verification" });
+  }
+});
+
+// ============================================================================
+// POST /auth/forgot-password
+// Request password reset
+// ============================================================================
+
+router.post("/forgot-password", authLimiter, async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: "Email required" });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const user = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+    });
+
+    // Always return success to prevent email enumeration
+    const successMessage = "If your email is registered, a password reset link has been sent";
+
+    if (!user) {
+      return res.json({ message: successMessage });
+    }
+
+    // Generate reset token
+    const resetToken = emailService.generateVerificationToken();
+    const resetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordResetToken: resetToken,
+        passwordResetExpires: resetExpires,
+      },
+    });
+
+    // Send reset email
+    await emailService.sendPasswordResetEmail(user, resetToken);
+
+    console.log("✅ Password reset email sent to:", user.email);
+
+    res.json({ message: successMessage });
+  } catch (error) {
+    console.error("❌ Forgot password error:", error);
+    res.status(500).json({ error: "Failed to process request" });
+  }
+});
+
+// ============================================================================
+// POST /auth/reset-password
+// Reset password with token
+// ============================================================================
+
+router.post("/reset-password", async (req, res) => {
+  try {
+    const { token, password } = req.body;
+
+    if (!token || !password) {
+      return res.status(400).json({ error: "Token and password required" });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({ error: "Password must be at least 8 characters" });
+    }
+
+    const user = await prisma.user.findFirst({
+      where: {
+        passwordResetToken: token,
+        passwordResetExpires: { gte: new Date() },
+      },
+    });
+
+    if (!user) {
+      return res.status(400).json({ error: "Invalid or expired reset token" });
+    }
+
+    // Hash new password
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    // Update password and clear reset token
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        passwordResetToken: null,
+        passwordResetExpires: null,
+      },
+    });
+
+    console.log("✅ Password reset for:", user.email);
+
+    res.json({ message: "Password reset successfully" });
+  } catch (error) {
+    console.error("❌ Reset password error:", error);
+    res.status(500).json({ error: "Failed to reset password" });
+  }
 });
 
 module.exports = router;

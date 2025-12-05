@@ -240,6 +240,12 @@ model User {
 
   twilioIdentity String? @unique
 
+  // Email Verification
+  emailVerified           Boolean   @default(false)
+  emailVerificationToken  String?   @unique
+  emailVerificationCode   String?
+  emailVerificationExpires DateTime?
+
   timezone           String  @default("America/New_York")
   language           String  @default("en")
   emailNotifications Boolean @default(true)
@@ -249,7 +255,7 @@ model User {
   lastLoginIp          String?
   mfaEnabled           Boolean   @default(false)
   mfaSecret            String?
-  passwordResetToken   String?
+  passwordResetToken   String?   @unique
   passwordResetExpires DateTime?
 
   // Current active organization (for session)

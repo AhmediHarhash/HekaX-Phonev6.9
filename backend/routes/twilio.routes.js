@@ -119,7 +119,7 @@ router.post("/recording/callback", async (req, res) => {
   try {
     await prisma.callLog.update({
       where: { callSid: CallSid },
-      data: { 
+      data: {
         recordingUrl: RecordingUrl,
         recordingDuration: RecordingDuration ? parseInt(RecordingDuration) : null,
       },
@@ -127,8 +127,46 @@ router.post("/recording/callback", async (req, res) => {
   } catch (err) {
     console.error("❌ Recording callback DB error:", err);
   }
-  
+
   res.sendStatus(200);
+});
+
+/**
+ * POST /twilio/voice/fallback
+ * Fallback handler when primary voice URL fails
+ */
+router.post("/voice/fallback", (req, res) => {
+  console.error("⚠️ Voice fallback triggered:", req.body);
+
+  const twiml = new VoiceResponse();
+  twiml.say(
+    { voice: "Polly.Amy" },
+    "We're sorry, we're experiencing technical difficulties. Please try your call again later."
+  );
+  twiml.hangup();
+
+  res.type("text/xml");
+  res.send(twiml.toString());
+});
+
+/**
+ * POST /twilio/sms/incoming
+ * Handle incoming SMS (placeholder for future)
+ */
+router.post("/sms/incoming", async (req, res) => {
+  const { From, To, Body } = req.body;
+  console.log("📱 Incoming SMS:", { From, To, Body: Body?.substring(0, 50) });
+
+  // TODO: Implement SMS handling
+  // For now, just acknowledge receipt
+
+  const MessagingResponse = twilio.twiml.MessagingResponse;
+  const twiml = new MessagingResponse();
+  // Don't auto-reply for now
+  // twiml.message("Thanks for your message. We'll get back to you soon!");
+
+  res.type("text/xml");
+  res.send(twiml.toString());
 });
 
 module.exports = router;

@@ -1,6 +1,7 @@
 // ============================================================================
 // HEKAX Phone - Twilio Service
-// Handles subaccounts, phone numbers, and credentials per organization
+// FULL AUTOMATION: Subaccounts, TwiML Apps, API Keys, Phone Numbers
+// One-click provisioning for new organizations
 // ============================================================================
 
 const twilio = require("twilio");
@@ -16,48 +17,14 @@ function getMasterClient() {
 }
 
 /**
- * Create a Twilio subaccount for a new organization
- */
-async function createSubaccount(organizationId, organizationName) {
-  const masterClient = getMasterClient();
-  
-  try {
-    // Create subaccount with friendly name
-    const subaccount = await masterClient.api.accounts.create({
-      friendlyName: `HEKAX - ${organizationName}`,
-    });
-
-    console.log("✅ Twilio subaccount created:", subaccount.sid);
-
-    // Update organization with subaccount SID
-    await prisma.organization.update({
-      where: { id: organizationId },
-      data: { 
-        twilioSubAccountSid: subaccount.sid,
-        twilioSubAccountToken: subaccount.authToken,
-      },
-    });
-
-    return {
-      sid: subaccount.sid,
-      authToken: subaccount.authToken,
-      friendlyName: subaccount.friendlyName,
-    };
-  } catch (error) {
-    console.error("❌ Failed to create Twilio subaccount:", error);
-    throw error;
-  }
-}
-
-/**
  * Get Twilio client for an organization
  * Uses subaccount if available, falls back to master account
  */
 async function getClientForOrganization(organizationId) {
   const org = await prisma.organization.findUnique({
     where: { id: organizationId },
-    select: { 
-      twilioSubAccountSid: true, 
+    select: {
+      twilioSubAccountSid: true,
       twilioSubAccountToken: true,
     },
   });
@@ -72,61 +39,271 @@ async function getClientForOrganization(organizationId) {
   return getMasterClient();
 }
 
+// ============================================================================
+// FULL PROVISIONING - The Magic Happens Here
+// ============================================================================
+
 /**
- * Search available phone numbers for an organization
- * Smart capability search: Voice+SMS required, fallback for MMS/Fax
+ * FULL AUTO-PROVISIONING
+ * Creates everything needed for a new organization:
+ * 1. Twilio Subaccount (isolated billing & resources)
+ * 2. TwiML App (voice webhook configuration)
+ * 3. API Key & Secret (for access tokens)
+ *
+ * Call this when a new organization is created!
+ */
+async function provisionOrganization(organizationId, organizationName) {
+  console.log("🚀 Starting full Twilio provisioning for:", organizationName);
+
+  const webhookBaseUrl = process.env.PUBLIC_BASE_URL;
+  if (!webhookBaseUrl) {
+    throw new Error("PUBLIC_BASE_URL not configured - cannot set up webhooks");
+  }
+
+  const masterClient = getMasterClient();
+  const results = {
+    subaccount: null,
+    twimlApp: null,
+    apiKey: null,
+    success: false,
+    errors: [],
+  };
+
+  try {
+    // ========================================================================
+    // STEP 1: Create Twilio Subaccount
+    // ========================================================================
+    console.log("📦 Step 1: Creating Twilio subaccount...");
+
+    const subaccount = await masterClient.api.accounts.create({
+      friendlyName: `HEKAX - ${organizationName}`,
+    });
+
+    results.subaccount = {
+      sid: subaccount.sid,
+      friendlyName: subaccount.friendlyName,
+    };
+
+    console.log("✅ Subaccount created:", subaccount.sid);
+
+    // Create client for the new subaccount
+    const subClient = twilio(subaccount.sid, subaccount.authToken);
+
+    // ========================================================================
+    // STEP 2: Create TwiML App in Subaccount
+    // ========================================================================
+    console.log("📱 Step 2: Creating TwiML App...");
+
+    const twimlApp = await subClient.applications.create({
+      friendlyName: `${organizationName} Voice App`,
+      voiceUrl: `${webhookBaseUrl}/twilio/voice/outbound`,
+      voiceMethod: "POST",
+      voiceFallbackUrl: `${webhookBaseUrl}/twilio/voice/fallback`,
+      voiceFallbackMethod: "POST",
+      statusCallback: `${webhookBaseUrl}/twilio/call/status`,
+      statusCallbackMethod: "POST",
+    });
+
+    results.twimlApp = {
+      sid: twimlApp.sid,
+      friendlyName: twimlApp.friendlyName,
+    };
+
+    console.log("✅ TwiML App created:", twimlApp.sid);
+
+    // ========================================================================
+    // STEP 3: Create API Key for Access Tokens
+    // ========================================================================
+    console.log("🔑 Step 3: Creating API Key...");
+
+    const apiKey = await subClient.newKeys.create({
+      friendlyName: `${organizationName} API Key`,
+    });
+
+    results.apiKey = {
+      sid: apiKey.sid,
+      // Secret is only returned once at creation!
+      secret: apiKey.secret,
+    };
+
+    console.log("✅ API Key created:", apiKey.sid);
+
+    // ========================================================================
+    // STEP 4: Save Everything to Database
+    // ========================================================================
+    console.log("💾 Step 4: Saving to database...");
+
+    await prisma.organization.update({
+      where: { id: organizationId },
+      data: {
+        // Subaccount credentials
+        twilioSubAccountSid: subaccount.sid,
+        twilioSubAccountToken: subaccount.authToken,
+        // TwiML App
+        twimlAppSid: twimlApp.sid,
+        // API Key (for generating access tokens)
+        twilioApiKeySid: apiKey.sid,
+        twilioApiKeySecret: apiKey.secret,
+        // Mark as provisioned
+        twilioProvisioned: true,
+        twilioProvisionedAt: new Date(),
+      },
+    });
+
+    console.log("✅ Database updated");
+
+    // ========================================================================
+    // DONE!
+    // ========================================================================
+    results.success = true;
+    console.log("🎉 Full provisioning complete for:", organizationName);
+    console.log("   Subaccount:", subaccount.sid);
+    console.log("   TwiML App:", twimlApp.sid);
+    console.log("   API Key:", apiKey.sid);
+
+    return results;
+
+  } catch (error) {
+    console.error("❌ Provisioning failed:", error);
+    results.errors.push(error.message);
+
+    // Try to cleanup if partial provisioning happened
+    if (results.subaccount?.sid) {
+      console.log("🧹 Attempting cleanup of partial provisioning...");
+      try {
+        // Close the subaccount (sets status to closed)
+        await masterClient.api.accounts(results.subaccount.sid).update({
+          status: "closed",
+        });
+        console.log("🗑️ Subaccount closed:", results.subaccount.sid);
+      } catch (cleanupErr) {
+        console.error("⚠️ Cleanup failed:", cleanupErr.message);
+      }
+    }
+
+    throw error;
+  }
+}
+
+/**
+ * Deprovision an organization (cleanup when org is deleted)
+ * Closes subaccount and removes from database
+ */
+async function deprovisionOrganization(organizationId) {
+  console.log("🗑️ Deprovisioning organization:", organizationId);
+
+  const org = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: {
+      name: true,
+      twilioSubAccountSid: true,
+    },
+  });
+
+  if (!org?.twilioSubAccountSid) {
+    console.log("⚠️ No subaccount to deprovision");
+    return { success: true, message: "No subaccount found" };
+  }
+
+  try {
+    const masterClient = getMasterClient();
+
+    // Close the subaccount (this releases all resources)
+    await masterClient.api.accounts(org.twilioSubAccountSid).update({
+      status: "closed",
+    });
+
+    console.log("✅ Subaccount closed:", org.twilioSubAccountSid);
+
+    // Clear Twilio data from organization
+    await prisma.organization.update({
+      where: { id: organizationId },
+      data: {
+        twilioSubAccountSid: null,
+        twilioSubAccountToken: null,
+        twimlAppSid: null,
+        twilioApiKeySid: null,
+        twilioApiKeySecret: null,
+        twilioProvisioned: false,
+        twilioProvisionedAt: null,
+      },
+    });
+
+    return { success: true, message: "Organization deprovisioned" };
+
+  } catch (error) {
+    console.error("❌ Deprovisioning failed:", error);
+    throw error;
+  }
+}
+
+/**
+ * Check provisioning status for an organization
+ */
+async function getProvisioningStatus(organizationId) {
+  const org = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: {
+      twilioProvisioned: true,
+      twilioProvisionedAt: true,
+      twilioSubAccountSid: true,
+      twimlAppSid: true,
+      twilioApiKeySid: true,
+      twilioNumber: true,
+    },
+  });
+
+  if (!org) {
+    return { provisioned: false, error: "Organization not found" };
+  }
+
+  return {
+    provisioned: org.twilioProvisioned || false,
+    provisionedAt: org.twilioProvisionedAt,
+    hasSubaccount: !!org.twilioSubAccountSid,
+    hasTwimlApp: !!org.twimlAppSid,
+    hasApiKey: !!org.twilioApiKeySid,
+    hasPhoneNumber: !!org.twilioNumber,
+    ready: !!(org.twilioProvisioned && org.twilioNumber),
+  };
+}
+
+// ============================================================================
+// PHONE NUMBER MANAGEMENT
+// ============================================================================
+
+/**
+ * Search available phone numbers
  */
 async function searchAvailableNumbers(organizationId, options = {}) {
-  const { areaCode, country = "US", type = "local", limit = 10 } = options;
-  
+  const { areaCode, country = "US", type = "local", limit = 10, contains } = options;
+
   const client = await getClientForOrganization(organizationId);
-  
-  // Try different capability combinations (most features first, then fallback)
-  const capabilityCombinations = [
-    { voiceEnabled: true, smsEnabled: true, mmsEnabled: true, faxEnabled: true },  // All 4
-    { voiceEnabled: true, smsEnabled: true, mmsEnabled: true },                     // No fax
-    { voiceEnabled: true, smsEnabled: true },                                       // Voice + SMS only
-  ];
+
+  // Build search parameters
+  const searchParams = {
+    voiceEnabled: true,
+    smsEnabled: true,
+    limit,
+  };
+
+  if (areaCode) searchParams.areaCode = areaCode;
+  if (contains) searchParams.contains = contains;
 
   let numbers = [];
-  let usedCaps = null;
 
-  for (const caps of capabilityCombinations) {
-    try {
-      const searchParams = {
-        ...caps,
-        limit,
-      };
-
-      if (areaCode) {
-        searchParams.areaCode = areaCode;
-      }
-
-      if (type === "tollfree") {
-        numbers = await client.availablePhoneNumbers(country).tollFree.list(searchParams);
-      } else {
-        numbers = await client.availablePhoneNumbers(country).local.list(searchParams);
-      }
-
-      if (numbers.length > 0) {
-        usedCaps = caps;
-        break; // Found numbers, stop searching
-      }
-    } catch (err) {
-      console.log(`⚠️ Search with caps ${JSON.stringify(caps)} failed:`, err.message);
-      // Continue to next capability combo
+  try {
+    if (type === "tollfree") {
+      numbers = await client.availablePhoneNumbers(country).tollFree.list(searchParams);
+    } else {
+      numbers = await client.availablePhoneNumbers(country).local.list(searchParams);
     }
+  } catch (err) {
+    console.error("❌ Number search failed:", err.message);
+    throw new Error("Failed to search phone numbers: " + err.message);
   }
 
-  // Log which capabilities were used
-  if (usedCaps) {
-    const features = [];
-    if (usedCaps.voiceEnabled) features.push("Voice");
-    if (usedCaps.smsEnabled) features.push("SMS");
-    if (usedCaps.mmsEnabled) features.push("MMS");
-    if (usedCaps.faxEnabled) features.push("Fax");
-    console.log(`📞 Found ${numbers.length} numbers with: ${features.join(", ")}`);
-  }
+  console.log(`📞 Found ${numbers.length} available numbers`);
 
   return {
     numbers: numbers.map((n) => ({
@@ -136,82 +313,174 @@ async function searchAvailableNumbers(organizationId, options = {}) {
       region: n.region,
       postalCode: n.postalCode,
       capabilities: n.capabilities,
+      monthlyPrice: n.price || "1.15", // Twilio local number base price
     })),
-    capabilitiesUsed: usedCaps,
-    message: usedCaps && !usedCaps.faxEnabled 
-      ? "Some features unavailable in this area" 
-      : null,
   };
 }
 
 /**
  * Purchase a phone number for an organization
+ * Automatically configures webhooks
  */
-async function purchaseNumber(organizationId, phoneNumber, webhookBaseUrl) {
+async function purchaseNumber(organizationId, phoneNumber) {
+  const webhookBaseUrl = process.env.PUBLIC_BASE_URL;
+  if (!webhookBaseUrl) {
+    throw new Error("PUBLIC_BASE_URL not configured");
+  }
+
+  const org = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { name: true, twimlAppSid: true },
+  });
+
   const client = await getClientForOrganization(organizationId);
-  
+
+  // Purchase the number with webhook configuration
   const purchased = await client.incomingPhoneNumbers.create({
     phoneNumber,
     voiceUrl: `${webhookBaseUrl}/twilio/voice/incoming`,
     voiceMethod: "POST",
+    voiceFallbackUrl: `${webhookBaseUrl}/twilio/voice/fallback`,
+    voiceFallbackMethod: "POST",
     statusCallback: `${webhookBaseUrl}/twilio/call/status`,
     statusCallbackMethod: "POST",
+    smsUrl: `${webhookBaseUrl}/twilio/sms/incoming`,
+    smsMethod: "POST",
+    friendlyName: `${org?.name || "HEKAX"} Main Line`,
   });
 
   console.log("✅ Phone number purchased:", purchased.phoneNumber);
+
+  // Save to PhoneNumber table
+  const phoneRecord = await prisma.phoneNumber.create({
+    data: {
+      number: purchased.phoneNumber,
+      friendlyName: purchased.friendlyName || "Main Line",
+      twilioSid: purchased.sid,
+      organizationId,
+      status: "active",
+      routeToAI: true,
+      capabilities: {
+        voice: purchased.capabilities.voice,
+        sms: purchased.capabilities.sms,
+        mms: purchased.capabilities.mms,
+      },
+    },
+  });
+
+  // Update organization's primary number if not set
+  const currentOrg = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { twilioNumber: true },
+  });
+
+  if (!currentOrg?.twilioNumber) {
+    await prisma.organization.update({
+      where: { id: organizationId },
+      data: { twilioNumber: purchased.phoneNumber },
+    });
+  }
 
   return {
     sid: purchased.sid,
     phoneNumber: purchased.phoneNumber,
     friendlyName: purchased.friendlyName,
     capabilities: purchased.capabilities,
+    dbRecord: phoneRecord,
   };
 }
 
 /**
  * Release a phone number
  */
-async function releaseNumber(organizationId, twilioSid) {
+async function releaseNumber(organizationId, phoneNumberId) {
+  const phoneRecord = await prisma.phoneNumber.findUnique({
+    where: { id: phoneNumberId },
+    select: { twilioSid: true, number: true, organizationId: true },
+  });
+
+  if (!phoneRecord) {
+    throw new Error("Phone number not found");
+  }
+
+  if (phoneRecord.organizationId !== organizationId) {
+    throw new Error("Phone number does not belong to this organization");
+  }
+
   const client = await getClientForOrganization(organizationId);
-  
-  await client.incomingPhoneNumbers(twilioSid).remove();
-  console.log("🗑️ Phone number released:", twilioSid);
+
+  // Release from Twilio
+  if (phoneRecord.twilioSid) {
+    await client.incomingPhoneNumbers(phoneRecord.twilioSid).remove();
+    console.log("🗑️ Phone number released from Twilio:", phoneRecord.number);
+  }
+
+  // Update database
+  await prisma.phoneNumber.update({
+    where: { id: phoneNumberId },
+    data: { status: "released" },
+  });
+
+  // Clear from organization if it was the primary number
+  await prisma.organization.updateMany({
+    where: { id: organizationId, twilioNumber: phoneRecord.number },
+    data: { twilioNumber: null },
+  });
+
+  return { success: true, number: phoneRecord.number };
 }
 
+// ============================================================================
+// ACCESS TOKEN GENERATION
+// ============================================================================
+
 /**
- * Generate access token for softphone (per organization)
+ * Generate access token for softphone
+ * Uses organization's API key for proper subaccount isolation
  */
 async function generateAccessToken(organizationId, identity) {
   const org = await prisma.organization.findUnique({
     where: { id: organizationId },
-    select: { 
+    select: {
       twilioSubAccountSid: true,
+      twilioApiKeySid: true,
+      twilioApiKeySecret: true,
       twimlAppSid: true,
     },
   });
 
-  const { TWILIO_ACCOUNT_SID, TWILIO_API_KEY, TWILIO_API_SECRET, TWIML_APP_SID } = process.env;
-  
-  // IMPORTANT: API Keys are tied to the account that created them.
-  // Always use MASTER account SID with master API Key for token generation.
-  // The TwiML App SID determines which app handles the calls.
-  const accountSid = TWILIO_ACCOUNT_SID;
-  const appSid = org?.twimlAppSid || TWIML_APP_SID;
+  // Determine which credentials to use
+  let accountSid, apiKey, apiSecret, appSid;
 
-  if (!accountSid || !TWILIO_API_KEY || !TWILIO_API_SECRET || !appSid) {
+  if (org?.twilioSubAccountSid && org?.twilioApiKeySid && org?.twilioApiKeySecret) {
+    // Use organization's subaccount credentials
+    accountSid = org.twilioSubAccountSid;
+    apiKey = org.twilioApiKeySid;
+    apiSecret = org.twilioApiKeySecret;
+    appSid = org.twimlAppSid;
+    console.log("🔐 Using org subaccount for token:", accountSid);
+  } else {
+    // Fallback to master account
+    const { TWILIO_ACCOUNT_SID, TWILIO_API_KEY, TWILIO_API_SECRET, TWIML_APP_SID } = process.env;
+    accountSid = TWILIO_ACCOUNT_SID;
+    apiKey = TWILIO_API_KEY;
+    apiSecret = TWILIO_API_SECRET;
+    appSid = org?.twimlAppSid || TWIML_APP_SID;
+    console.log("⚠️ Using master account for token (org not fully provisioned)");
+  }
+
+  if (!accountSid || !apiKey || !apiSecret || !appSid) {
     throw new Error("Missing Twilio configuration for token generation");
   }
 
   const AccessToken = twilio.jwt.AccessToken;
   const VoiceGrant = AccessToken.VoiceGrant;
 
-  // Token is created with master account credentials
-  const token = new AccessToken(accountSid, TWILIO_API_KEY, TWILIO_API_SECRET, {
+  const token = new AccessToken(accountSid, apiKey, apiSecret, {
     identity,
-    ttl: 3600,
+    ttl: 3600, // 1 hour
   });
 
-  // Grant points to org's TwiML App (which lives in their subaccount)
   token.addGrant(
     new VoiceGrant({
       outgoingApplicationSid: appSid,
@@ -219,44 +488,61 @@ async function generateAccessToken(organizationId, identity) {
     })
   );
 
-  console.log("✅ Token generated for org:", organizationId, "using app:", appSid);
+  console.log("✅ Access token generated for identity:", identity);
 
   return {
     token: token.toJwt(),
     identity,
+    accountSid,
+    appSid,
   };
 }
 
+// ============================================================================
+// LEGACY FUNCTIONS (for backwards compatibility)
+// ============================================================================
+
 /**
- * Create TwiML App for an organization's subaccount
+ * @deprecated Use provisionOrganization instead
  */
-async function createTwimlApp(organizationId, organizationName, webhookBaseUrl) {
-  const client = await getClientForOrganization(organizationId);
-  
-  const app = await client.applications.create({
-    friendlyName: `${organizationName} Voice App`,
-    voiceUrl: `${webhookBaseUrl}/twilio/voice/outbound`,
-    voiceMethod: "POST",
-  });
-
-  // Save TwiML App SID to organization
-  await prisma.organization.update({
-    where: { id: organizationId },
-    data: { twimlAppSid: app.sid },
-  });
-
-  console.log("✅ TwiML App created:", app.sid);
-
-  return app;
+async function createSubaccount(organizationId, organizationName) {
+  console.log("⚠️ createSubaccount is deprecated, use provisionOrganization");
+  const result = await provisionOrganization(organizationId, organizationName);
+  return result.subaccount;
 }
 
+/**
+ * @deprecated Use provisionOrganization instead
+ */
+async function createTwimlApp(organizationId, organizationName, webhookBaseUrl) {
+  console.log("⚠️ createTwimlApp is deprecated, use provisionOrganization");
+  // This is now handled by provisionOrganization
+  throw new Error("Use provisionOrganization instead");
+}
+
+// ============================================================================
+// EXPORTS
+// ============================================================================
+
 module.exports = {
+  // Core
   getMasterClient,
-  createSubaccount,
   getClientForOrganization,
+
+  // Full provisioning (THE MAIN ONES TO USE)
+  provisionOrganization,
+  deprovisionOrganization,
+  getProvisioningStatus,
+
+  // Phone numbers
   searchAvailableNumbers,
   purchaseNumber,
   releaseNumber,
+
+  // Tokens
   generateAccessToken,
+
+  // Legacy (deprecated)
+  createSubaccount,
   createTwimlApp,
 };

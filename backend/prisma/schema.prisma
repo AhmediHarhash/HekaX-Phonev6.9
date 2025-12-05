@@ -104,13 +104,17 @@ model Organization {
   onboardingCompleted Boolean @default(false)
   industry            String  @default("general")
 
- // Telephony
+ // Telephony - Auto-provisioned per organization
   twilioNumber          String?  @unique
-  twilioAccountSid      String?
-  twilioAuthToken       String?
-  twilioSubAccountSid   String?  // Subaccount SID for multi-tenant
-  twilioSubAccountToken String?  // Subaccount Auth Token
-  twimlAppSid           String?  // TwiML App SID for this org
+  twilioAccountSid      String?  // Legacy: direct account (deprecated)
+  twilioAuthToken       String?  // Legacy: direct token (deprecated)
+  twilioSubAccountSid   String?  // Subaccount SID (auto-created)
+  twilioSubAccountToken String?  // Subaccount Auth Token (auto-created)
+  twimlAppSid           String?  // TwiML App SID (auto-created)
+  twilioApiKeySid       String?  // API Key SID for access tokens
+  twilioApiKeySecret    String?  // API Key Secret (encrypted)
+  twilioProvisioned     Boolean  @default(false)  // Full provisioning complete?
+  twilioProvisionedAt   DateTime?  // When provisioning completed
   forwardingNumber      String?
   pendingPhoneNumber    String?  // Selected during trial, purchased on subscription
 

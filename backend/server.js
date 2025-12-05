@@ -193,8 +193,12 @@ try {
   // Voice preview routes
   const voiceRoutes = require("./routes/voice.routes");
   app.use("/api/voice", voiceRoutes);
-  
-  console.log("✅ API routes loaded (including Phase 6.5 Data Management)");
+
+  // Twilio provisioning routes (auto-setup for organizations)
+  const provisioningRoutes = require("./routes/provisioning.routes");
+  app.use("/api/provisioning", provisioningRoutes);
+
+  console.log("✅ API routes loaded (including Twilio auto-provisioning)");
 } catch (err) {
   console.error("❌ API routes error:", err);
 }

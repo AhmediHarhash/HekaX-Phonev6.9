@@ -219,6 +219,7 @@ model Organization {
   addonPurchases  AddOnPurchase[]
   calendarIntegrations CalendarIntegration[]
   calendarBookings     CalendarBooking[]
+  crmIntegrations      CrmIntegration[]
 
   @@index([slug])
   @@index([status])
@@ -264,6 +265,7 @@ model User {
   assignedLeads Lead[]    @relation("AssignedAgent")
   callsHandled  CallLog[] @relation("HandledBy")
   calendarConnections CalendarIntegration[] @relation("CalendarConnectedBy")
+  crmConnections      CrmIntegration[]      @relation("CRMConnectedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -841,4 +843,96 @@ model CalendarBooking {
   @@index([scheduledAt])
   @@index([status])
   @@index([callerPhone])
+}
+
+// ============================================================================
+// CRM INTEGRATIONS
+// ============================================================================
+
+enum CRMProviderType {
+  HUBSPOT
+  SALESFORCE
+  ZOHO
+  PIPEDRIVE
+  WEBHOOK
+}
+
+enum CRMSyncStatus {
+  SUCCESS
+  FAILED
+  PENDING
+}
+
+model CrmIntegration {
+  id String @id @default(cuid())
+
+  provider    CRMProviderType
+  enabled     Boolean         @default(true)
+
+  // OAuth tokens (for HubSpot, Salesforce, Zoho, Pipedrive)
+  accessToken    String?  @db.Text
+  refreshToken   String?  @db.Text
+  tokenExpiresAt DateTime?
+  instanceUrl    String?  // For Salesforce, Pipedrive
+
+  // API Key (for webhook secret or API-based integrations)
+  apiKey String? @db.Text
+
+  // Webhook URL (for generic webhook provider)
+  webhookUrl String?
+
+  // Sync settings
+  syncLeads        Boolean @default(true)
+  syncCalls        Boolean @default(true)
+  syncTranscripts  Boolean @default(false)
+  syncAppointments Boolean @default(true)
+
+  // Mapping settings (JSON)
+  fieldMappings Json? // Custom field mappings
+  settings      Json? // Provider-specific settings
+
+  // Status
+  lastSyncAt   DateTime?
+  lastSyncStatus CRMSyncStatus?
+  lastError    String?
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // Who connected it
+  connectedById String?
+  connectedBy   User?   @relation("CRMConnectedBy", fields: [connectedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  syncLogs CrmSyncLog[]
+
+  @@unique([organizationId, provider])
+  @@index([organizationId])
+  @@index([provider])
+}
+
+model CrmSyncLog {
+  id String @id @default(cuid())
+
+  syncType   String  // lead, call, transcript, appointment
+  entityId   String  // HEKAX entity ID
+  externalId String? // CRM entity ID
+
+  status CRMSyncStatus
+  error  String?       @db.Text
+
+  requestData  String? @db.Text
+  responseData String? @db.Text
+
+  crmIntegrationId String
+  crmIntegration   CrmIntegration @relation(fields: [crmIntegrationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([crmIntegrationId])
+  @@index([syncType])
+  @@index([status])
+  @@index([createdAt])
 }

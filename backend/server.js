@@ -286,6 +286,10 @@ try {
   const calendarRoutes = require("./routes/calendar.routes");
   app.use("/api/calendar", calendarRoutes);
 
+  // CRM integrations
+  const crmRoutes = require("./routes/crm.routes");
+  app.use("/api/crm", crmRoutes);
+
   console.log("✅ API routes loaded");
 } catch (err) {
   console.error("❌ API routes error:", err);

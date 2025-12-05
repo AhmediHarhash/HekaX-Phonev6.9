@@ -9,6 +9,7 @@ const WebSocket = require("ws");
 const twilio = require("twilio");
 const EventEmitter = require("events");
 const { CalendarService } = require("./calendar");
+const { CRMService } = require("./crm");
 
 // ============================================================================
 // VOICE OPTIONS (OpenAI TTS)
@@ -290,6 +291,7 @@ class AIReceptionist extends EventEmitter {
       process.env.TWILIO_AUTH_TOKEN
     );
     this.calendarService = new CalendarService(prisma);
+    this.crmService = new CRMService(prisma);
   }
 
   // ===========================================================================
@@ -1240,12 +1242,13 @@ CONVERSATION GUIDELINES:
     const callDuration = Math.round((Date.now() - this.callStartTime) / 1000);
     console.log(`📞 Call duration: ${callDuration}s, Turns: ${this.turnCount}, Transcript entries: ${this.transcript.length}`);
 
-    // Process webhook queue
+    // Process webhook queue (includes CRM sync)
     await this.processWebhookQueue();
 
     // Save call log
+    let savedCallLog = null;
     try {
-      await this.prisma.callLog.upsert({
+      savedCallLog = await this.prisma.callLog.upsert({
         where: { callSid: this.callSid },
         update: {
           handledByAI: true,
@@ -1272,12 +1275,14 @@ CONVERSATION GUIDELINES:
     }
 
     // Save transcript
+    let savedTranscript = null;
+    let savedLead = null;
     if (this.transcript.length > 0) {
       try {
         const summary = await this.generateSummary();
         console.log("📝 Summary:", summary);
 
-        await this.prisma.transcript.create({
+        savedTranscript = await this.prisma.transcript.create({
           data: {
             callSid: this.callSid,
             fullText: this.transcript.map(t => `${t.role}: ${t.content}`).join("\n"),
@@ -1300,7 +1305,7 @@ CONVERSATION GUIDELINES:
 
           if (existingLead) {
             // Update existing lead
-            await this.prisma.lead.update({
+            savedLead = await this.prisma.lead.update({
               where: { id: existingLead.id },
               data: {
                 name: this.callerInfo.name || existingLead.name,
@@ -1318,7 +1323,7 @@ CONVERSATION GUIDELINES:
             console.log("✅ Lead updated:", this.callerInfo.name || existingLead.name);
           } else {
             // Create new lead
-            await this.prisma.lead.create({
+            savedLead = await this.prisma.lead.create({
               data: {
                 callSid: this.callSid,
                 name: this.callerInfo.name || "Unknown Caller",
@@ -1344,30 +1349,68 @@ CONVERSATION GUIDELINES:
       }
     }
 
+    // =========================================================================
+    // CRM SYNC - Automatically sync to connected CRMs
+    // =========================================================================
+    if (this.organization?.id) {
+      try {
+        // Sync lead to CRM
+        if (savedLead) {
+          console.log("🔄 Syncing lead to CRM...");
+          const crmLeadResults = await this.crmService.syncLead(this.organization.id, savedLead);
+          console.log("✅ CRM lead sync:", crmLeadResults.length, "providers processed");
+        }
+
+        // Sync call to CRM
+        if (savedCallLog) {
+          console.log("🔄 Syncing call to CRM...");
+          const crmCallResults = await this.crmService.syncCall(
+            this.organization.id,
+            savedCallLog,
+            savedTranscript
+          );
+          console.log("✅ CRM call sync:", crmCallResults.length, "providers processed");
+        }
+
+        // Trigger webhook events for the call
+        await this.crmService.triggerWebhooks(this.organization.id, "call.completed", {
+          call: savedCallLog,
+          transcript: savedTranscript,
+          lead: savedLead,
+          callerInfo: this.callerInfo,
+        });
+      } catch (crmError) {
+        console.error("⚠️ CRM sync error:", crmError.message);
+        // Don't throw - CRM sync failures shouldn't break the call cleanup
+      }
+    }
+
     console.log("🧹 Cleanup complete");
   }
 
   async processWebhookQueue() {
     if (this.webhookQueue.length === 0) return;
+    if (!this.organization?.id) return;
 
     console.log(`📤 Processing ${this.webhookQueue.length} queued webhooks`);
-
-    // TODO: Get webhook URL from organization settings
-    // const webhookUrl = this.organization?.webhookUrl;
-    // if (!webhookUrl) return;
 
     for (const event of this.webhookQueue) {
       try {
         console.log("📤 Webhook event:", event.type);
-        // await fetch(webhookUrl, {
-        //   method: "POST",
-        //   headers: { "Content-Type": "application/json" },
-        //   body: JSON.stringify(event),
-        // });
+
+        // Use CRM service to trigger webhooks
+        await this.crmService.triggerWebhooks(
+          this.organization.id,
+          event.type,
+          event.data
+        );
       } catch (error) {
         console.error("❌ Webhook error:", error.message);
       }
     }
+
+    // Clear the queue
+    this.webhookQueue = [];
   }
 }
 

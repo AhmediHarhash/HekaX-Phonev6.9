@@ -854,45 +854,33 @@ export function BillingPage() {
                     <div
                       key={plan.id}
                       className={`
-                        relative rounded-2xl overflow-hidden transition-all duration-300
+                        relative rounded-2xl transition-all duration-300
                         ${plan.popular
                           ? 'ring-2 ring-purple-500 shadow-2xl shadow-purple-500/20 scale-[1.02]'
                           : 'ring-1 ring-slate-700 hover:ring-slate-600'
                         }
-                        ${isCurrentPlan ? 'ring-2 ring-emerald-500' : ''}
+                        ${isCurrentPlan && !plan.popular ? 'ring-2 ring-emerald-500' : ''}
                       `}
                     >
-                      {/* Popular Badge */}
+                      {/* Popular Badge - positioned outside card flow */}
                       {plan.popular && (
-                        <div className="absolute top-0 left-0 right-0 bg-gradient-to-r from-purple-600 to-pink-600 text-white text-center py-2.5 text-sm font-semibold flex items-center justify-center gap-2">
+                        <div className="bg-gradient-to-r from-purple-600 to-pink-600 text-white text-center py-2.5 text-sm font-semibold flex items-center justify-center gap-2 rounded-t-2xl">
                           <Sparkles size={14} />
                           Most Popular
                         </div>
                       )}
 
-                      {/* Current Plan Badge */}
+                      {/* Current Plan Badge - positioned outside card flow */}
                       {isCurrentPlan && !plan.popular && (
-                        <div className="absolute top-0 left-0 right-0 bg-emerald-600 text-white text-center py-2.5 text-sm font-semibold flex items-center justify-center gap-2">
+                        <div className="bg-emerald-600 text-white text-center py-2.5 text-sm font-semibold flex items-center justify-center gap-2 rounded-t-2xl">
                           <CheckCircle size={14} />
                           Current Plan
                         </div>
                       )}
 
-                      <div className={`p-6 lg:p-8 ${plan.popular || isCurrentPlan ? 'pt-14' : ''} bg-gradient-to-b from-slate-800/50 to-slate-900/80`}>
-                        {/* Plan Icon & Header */}
+                      <div className={`p-6 lg:p-8 bg-gradient-to-b from-slate-800/50 to-slate-900/80 ${!plan.popular && !isCurrentPlan ? 'rounded-2xl' : 'rounded-b-2xl'}`}>
+                        {/* Plan Header */}
                         <div className="text-center mb-6">
-                          <div className={`
-                            inline-flex w-14 h-14 rounded-2xl items-center justify-center mb-4
-                            ${plan.color === 'amber' ? 'bg-gradient-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/30' :
-                              plan.color === 'purple' ? 'bg-gradient-to-br from-purple-500/20 to-pink-500/20 border border-purple-500/30' :
-                              'bg-gradient-to-br from-blue-500/20 to-cyan-500/20 border border-blue-500/30'
-                            }
-                          `}>
-                            <Icon size={26} className={
-                              plan.color === 'amber' ? 'text-amber-400' :
-                              plan.color === 'purple' ? 'text-purple-400' : 'text-blue-400'
-                            } />
-                          </div>
                           <h3 className="text-2xl font-bold text-white mb-2">{plan.name}</h3>
                           <p className="text-sm text-slate-400">{plan.description}</p>
                         </div>
@@ -930,20 +918,24 @@ export function BillingPage() {
                         {/* CTA Button */}
                         <button
                           onClick={() => {
-                            setShowPlansModal(false);
-                            handleUpgrade(plan.id);
+                            if (!isCurrentPlan && !isDowngrade) {
+                              setShowPlansModal(false);
+                              handleUpgrade(plan.id);
+                            }
                           }}
-                          disabled={actionLoading || isCurrentPlan}
+                          disabled={actionLoading || isCurrentPlan || isDowngrade}
                           className={`
                             w-full py-3.5 px-4 rounded-xl font-semibold text-sm
                             transition-all duration-200 transform flex items-center justify-center gap-2
                             ${isCurrentPlan
                               ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                              : plan.popular
-                                ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-500 hover:to-pink-500 hover:scale-[1.02] shadow-lg shadow-purple-500/25'
-                                : 'bg-slate-700 text-white hover:bg-slate-600'
+                              : isDowngrade
+                                ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+                                : plan.popular
+                                  ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-500 hover:to-pink-500 hover:scale-[1.02] shadow-lg shadow-purple-500/25'
+                                  : 'bg-slate-700 text-white hover:bg-slate-600'
                             }
-                            disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100
+                            disabled:hover:scale-100
                           `}
                         >
                           {actionLoading ? (
@@ -951,7 +943,7 @@ export function BillingPage() {
                           ) : isCurrentPlan ? (
                             'Current Plan'
                           ) : isDowngrade ? (
-                            'Contact Support'
+                            'Your current plan has more features'
                           ) : (
                             <>
                               {plan.cta}

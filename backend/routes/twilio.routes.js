@@ -82,9 +82,9 @@ router.post(
         process.env.AI_RECEPTIONIST_ENABLED === "true";
 
       // Determine client identity for this organization
-      // Format: {organizationId}-web (matches token generation and AI transfer)
-      const clientIdentity = org?.id
-        ? `${org.id}-web`
+      // Format: {slug}-web (matches token generation and AI transfer)
+      const clientIdentity = org?.slug
+        ? `${org.slug}-web`
         : "default-web";
 
       console.log("📞 Routing to:", { orgId: org?.id, aiEnabled, clientIdentity });

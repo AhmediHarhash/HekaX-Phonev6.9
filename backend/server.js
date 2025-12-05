@@ -231,9 +231,13 @@ const { authMiddleware } = require("./middleware/auth.middleware");
 app.get("/token", authMiddleware, async (req, res) => {
   try {
     const twilioService = require("./services/twilio.service");
-    // Use stable identity: organizationId-web (no timestamp!)
+    // Use stable identity based on org slug: {slug}-web
     // This allows transfers to find the registered client
-    const identity = `${req.organizationId}-web`;
+    const org = await prisma.organization.findUnique({
+      where: { id: req.organizationId },
+      select: { slug: true }
+    });
+    const identity = org?.slug ? `${org.slug}-web` : `${req.organizationId}-web`;
 
     const result = await twilioService.generateAccessToken(
       req.organizationId,
@@ -260,7 +264,7 @@ app.get("/token", authMiddleware, async (req, res) => {
     }
 
     // Fallback: use organizationId-web or default
-    const identity = req.organizationId ? `${req.organizationId}-web` : "default-web";
+    const identity = req.organizationId ? `org-${req.organizationId}-web` : "default-web";
 
     const token = new AccessToken(
       TWILIO_ACCOUNT_SID,

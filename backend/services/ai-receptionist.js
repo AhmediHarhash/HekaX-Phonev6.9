@@ -457,9 +457,9 @@ class AIReceptionist {
       const callerId = this.toNumber || process.env.TWILIO_NUMBER;
 
       // Use organization-based client identity (matches token generation)
-      // Format: {organizationId}-web
-      const clientIdentity = this.organization?.id
-        ? `${this.organization.id}-web`
+      // Format: {slug}-web (e.g., hekax-web)
+      const clientIdentity = this.organization?.slug
+        ? `${this.organization.slug}-web`
         : "default-web";
 
       console.log("📞 Dialing client:", clientIdentity);

@@ -23,6 +23,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@aws-sdk/client-ses": "^3.946.0",
     "@deepgram/sdk": "^3.9.0",
     "@prisma/client": "^5.22.0",
     "archiver": "^7.0.0",

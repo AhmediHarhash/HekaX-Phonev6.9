@@ -1,23 +1,44 @@
 // ============================================================================
 // HEKAX Phone - Email Service
-// Professional transactional email with Resend (or fallback SendGrid)
+// Professional transactional email with multiple provider support
+// Priority: Resend > SendGrid > AWS SES
 // ============================================================================
 
 const crypto = require("crypto");
 
-// Try to load Resend (preferred) or fall back to SendGrid
+// Try to load email providers in order of preference
 let resend = null;
 let sendgrid = null;
+let sesClient = null;
+let activeProvider = null;
 
 try {
   if (process.env.RESEND_API_KEY) {
     const { Resend } = require("resend");
     resend = new Resend(process.env.RESEND_API_KEY);
+    activeProvider = "Resend";
     console.log("✅ Email service: Resend configured");
   } else if (process.env.SENDGRID_API_KEY) {
     sendgrid = require("@sendgrid/mail");
     sendgrid.setApiKey(process.env.SENDGRID_API_KEY);
+    activeProvider = "SendGrid";
     console.log("✅ Email service: SendGrid configured");
+  } else if (process.env.AWS_SES_REGION || process.env.AWS_ACCESS_KEY_ID) {
+    // AWS SES - works with IAM roles (EC2/Lambda) or explicit credentials
+    const { SESClient, SendEmailCommand } = require("@aws-sdk/client-ses");
+    const sesConfig = {
+      region: process.env.AWS_SES_REGION || process.env.AWS_REGION || "us-east-1",
+    };
+    // Only add credentials if explicitly provided (otherwise uses IAM role)
+    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+      sesConfig.credentials = {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      };
+    }
+    sesClient = new SESClient(sesConfig);
+    activeProvider = "AWS SES";
+    console.log("✅ Email service: AWS SES configured (region:", sesConfig.region + ")");
   }
 } catch (err) {
   console.warn("⚠️ Email service not configured:", err.message);
@@ -482,7 +503,8 @@ Questions? Contact ${EMAIL_CONFIG.supportEmail}
 
 class EmailService {
   constructor() {
-    this.isConfigured = !!(resend || sendgrid);
+    this.isConfigured = !!(resend || sendgrid || sesClient);
+    this.provider = activeProvider;
   }
 
   /**
@@ -497,6 +519,16 @@ class EmailService {
    */
   generateVerificationCode() {
     return Math.floor(100000 + Math.random() * 900000).toString();
+  }
+
+  /**
+   * Get current provider info
+   */
+  getProviderInfo() {
+    return {
+      configured: this.isConfigured,
+      provider: this.provider || "None",
+    };
   }
 
   /**
@@ -524,7 +556,7 @@ class EmailService {
         // Use Resend
         const result = await resend.emails.send(emailData);
         console.log("✅ Email sent via Resend:", to, "|", subject);
-        return { success: true, id: result.id };
+        return { success: true, id: result.id, provider: "Resend" };
       } else if (sendgrid) {
         // Use SendGrid
         await sendgrid.send({
@@ -536,7 +568,49 @@ class EmailService {
           text,
         });
         console.log("✅ Email sent via SendGrid:", to, "|", subject);
-        return { success: true };
+        return { success: true, provider: "SendGrid" };
+      } else if (sesClient) {
+        // Use AWS SES
+        const { SendEmailCommand } = require("@aws-sdk/client-ses");
+
+        // Parse "Name <email>" format
+        const parseEmail = (emailStr) => {
+          const match = emailStr.match(/^(.+)\s*<(.+)>$/);
+          if (match) {
+            return { name: match[1].trim(), email: match[2].trim() };
+          }
+          return { name: null, email: emailStr };
+        };
+
+        const fromParsed = parseEmail(EMAIL_CONFIG.from);
+
+        const command = new SendEmailCommand({
+          Source: EMAIL_CONFIG.from,
+          Destination: {
+            ToAddresses: Array.isArray(to) ? to : [to],
+          },
+          Message: {
+            Subject: {
+              Data: subject,
+              Charset: "UTF-8",
+            },
+            Body: {
+              Html: {
+                Data: html,
+                Charset: "UTF-8",
+              },
+              Text: {
+                Data: text || subject,
+                Charset: "UTF-8",
+              },
+            },
+          },
+          ReplyToAddresses: [replyTo || EMAIL_CONFIG.replyTo],
+        });
+
+        const result = await sesClient.send(command);
+        console.log("✅ Email sent via AWS SES:", to, "|", subject, "| MessageId:", result.MessageId);
+        return { success: true, id: result.MessageId, provider: "AWS SES" };
       }
 
       return { success: false, error: "No email provider available" };

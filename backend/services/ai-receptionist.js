@@ -357,7 +357,7 @@ class AIReceptionist {
       // Generate AI response
       console.log("🧠 Generating response...");
       const response = await this.openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: "gpt-5.1",
         messages: [
           { role: "system", content: this.getSystemPrompt() },
           ...this.conversationHistory,
@@ -388,7 +388,7 @@ class AIReceptionist {
   async extractCallerInfo(userText) {
     try {
       const response = await this.openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: "gpt-5-mini",
         messages: [
           {
             role: "system",
@@ -682,7 +682,7 @@ If caller says any of: "speak to someone", "real person", "human", "transfer", "
 
     try {
       const response = await this.openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: "gpt-5-mini",
         messages: [
           {
             role: "system",

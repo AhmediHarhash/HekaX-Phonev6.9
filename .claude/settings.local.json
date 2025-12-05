@@ -12,7 +12,8 @@
       "Bash(node scripts/create-ahmed-account.js:*)",
       "Bash(git commit -m \"$(cat <<''EOF''\nfeat: Professional SaaS UI overhaul and preferences system\n\n- Add light theme with proper CSS overrides and shadows\n- Add compact mode for reduced spacing\n- Remove sound effects option from preferences\n- Redesign billing page with professional SaaS styling\n- Add gradient backgrounds, hover effects, and animations\n- Add enterprise contact sales section with email link\n- Add trust badges and improved plan selection modal\n- Add global CSS enhancements (tooltips, animations, accessibility)\n- Add account creation script for Ahmed Ibrahim (SCALE plan)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(npm run build:*)"
     ],
     "deny": [],
     "ask": []

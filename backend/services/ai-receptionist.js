@@ -124,7 +124,12 @@ class AIReceptionist {
     // Check every 500ms if we have audio to process
     this.silenceTimer = setInterval(async () => {
       const timeSinceLastAudio = Date.now() - this.lastAudioTime;
-      
+
+      // Debug log every 5 seconds
+      if (Date.now() % 5000 < 500) {
+        console.log(`🔍 Status: buffer=${this.audioBuffer.length}, silence=${Math.round(timeSinceLastAudio/1000)}s, processing=${this.isProcessing}, speaking=${this.isSpeaking}`);
+      }
+
       // If we have audio buffered and enough silence has passed
       if (
         this.audioBuffer.length > 0 &&
@@ -132,6 +137,7 @@ class AIReceptionist {
         !this.isProcessing &&
         !this.isSpeaking
       ) {
+        console.log("🎯 Silence detected, processing audio...");
         await this.processBufferedAudio();
       }
     }, 500);
@@ -145,6 +151,11 @@ class AIReceptionist {
     const audioData = Buffer.from(payload, "base64");
     this.audioBuffer.push(audioData);
     this.lastAudioTime = Date.now();
+
+    // Log occasionally to confirm audio is being received
+    if (this.audioBuffer.length % 100 === 0) {
+      console.log(`🎤 Audio buffered: ${this.audioBuffer.length} chunks (${Math.round(this.audioBuffer.length * 20 / 1000)}s)`);
+    }
   }
 
   async processBufferedAudio() {
@@ -153,10 +164,14 @@ class AIReceptionist {
 
     // Combine all audio chunks
     const combinedAudio = Buffer.concat(this.audioBuffer);
+    const audioLength = this.audioBuffer.length;
     this.audioBuffer = []; // Clear buffer
+
+    console.log(`🎤 Processing ${audioLength} audio chunks (${combinedAudio.length} bytes)`);
 
     // Skip if too short (likely just noise)
     if (combinedAudio.length < this.MIN_AUDIO_LENGTH) {
+      console.log("⚠️ Audio too short, skipping");
       return;
     }
 
@@ -165,12 +180,14 @@ class AIReceptionist {
     try {
       // Convert mulaw 8kHz to WAV for OpenAI
       const wavBuffer = this.mulawToWav(combinedAudio);
+      console.log(`🔄 Converted to WAV: ${wavBuffer.length} bytes`);
 
       // Write to temp file (OpenAI SDK needs a file)
       const tempFile = path.join(os.tmpdir(), `hekax-audio-${Date.now()}.wav`);
       fs.writeFileSync(tempFile, wavBuffer);
 
       // Transcribe with OpenAI Whisper
+      console.log("🎯 Sending to Whisper for transcription...");
       const transcript = await this.transcribeAudio(tempFile);
 
       // Clean up temp file
@@ -184,9 +201,12 @@ class AIReceptionist {
           timestamp: new Date().toISOString(),
         });
         await this.processUserInput(transcript);
+      } else {
+        console.log("⚠️ Whisper returned empty transcript");
       }
     } catch (error) {
       console.error("❌ Audio processing error:", error.message);
+      console.error(error.stack);
     } finally {
       this.isProcessing = false;
     }
@@ -411,16 +431,31 @@ Extract any new information:`,
     try {
       console.log("🔊 Speaking:", text.substring(0, 50) + "...");
       this.isSpeaking = true;
+
+      // Safety timeout - never stay in speaking mode for more than 30 seconds
+      const safetyTimeout = setTimeout(() => {
+        if (this.isSpeaking) {
+          console.log("⚠️ Speaking safety timeout triggered");
+          this.isSpeaking = false;
+        }
+      }, 30000);
+
       const audioBuffer = await this.textToSpeech(text);
       if (audioBuffer) {
+        console.log(`🔊 Sending ${audioBuffer.length} bytes of audio to Twilio`);
         await this.sendAudioToTwilio(audioBuffer);
+      } else {
+        console.log("⚠️ No audio buffer generated from TTS");
       }
+
+      clearTimeout(safetyTimeout);
     } catch (error) {
       console.error("❌ Speak error:", error);
     } finally {
       // Add small delay before allowing audio capture again
       setTimeout(() => {
         this.isSpeaking = false;
+        console.log("🎤 Ready to listen again");
       }, 500);
     }
   }

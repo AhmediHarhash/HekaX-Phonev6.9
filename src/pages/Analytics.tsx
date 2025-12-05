@@ -306,7 +306,7 @@ export function AnalyticsPage() {
 
       {/* Plan Info */}
       <Card className="mt-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <h3 className="font-semibold text-white mb-1">Current Plan</h3>
             <p className="text-slate-400">
@@ -318,7 +318,10 @@ export function AnalyticsPage() {
               )}
             </p>
           </div>
-          <button className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors">
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('navigate', { detail: 'billing' }))}
+            className="px-4 py-2 rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-medium transition-all shadow-lg shadow-blue-500/20"
+          >
             Upgrade Plan
           </button>
         </div>

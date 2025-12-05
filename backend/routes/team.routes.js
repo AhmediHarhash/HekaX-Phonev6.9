@@ -7,6 +7,7 @@ const bcrypt = require("bcrypt");
 const crypto = require("crypto");
 const prisma = require("../lib/prisma");
 const { authMiddleware, requireRole } = require("../middleware/auth.middleware");
+const { emailService } = require("../services/email");
 
 const router = express.Router();
 
@@ -119,10 +120,29 @@ router.post("/invite", authMiddleware, requireRole("OWNER", "ADMIN"), async (req
 
     const inviteLink = `${process.env.FRONTEND_URL || 'https://phone.hekax.com'}/accept-invite?token=${inviteToken}`;
 
-    console.log("📧 Invite created for:", normalizedEmail);
+    // Get organization name for email
+    const organization = await prisma.organization.findUnique({
+      where: { id: req.organizationId },
+      select: { name: true },
+    });
+
+    // Send invitation email
+    const emailResult = await emailService.sendTeamInviteEmail({
+      inviterName: req.user.name,
+      orgName: organization?.name || 'Your Team',
+      email: normalizedEmail,
+      inviteToken,
+      role: role,
+    });
+
+    if (emailResult.success) {
+      console.log("📧 Invite email sent to:", normalizedEmail);
+    } else {
+      console.warn("⚠️ Invite email failed:", emailResult.error);
+    }
 
     res.status(201).json({
-      message: "Invitation sent",
+      message: emailResult.success ? "Invitation sent" : "Invitation created (email not sent)",
       user: {
         id: result.user.id,
         email: result.user.email,
@@ -130,8 +150,7 @@ router.post("/invite", authMiddleware, requireRole("OWNER", "ADMIN"), async (req
         role: result.membership.role,
         status: result.user.status,
       },
-      // In production, send via email instead
-      inviteLink,
+      emailSent: emailResult.success,
     });
   } catch (err) {
     console.error("❌ POST /api/team/invite error:", err);

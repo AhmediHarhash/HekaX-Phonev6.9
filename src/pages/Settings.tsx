@@ -29,6 +29,7 @@ import {
   Zap,
   Globe,
   X,
+  Calendar,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { PageHeader } from '../components/layout';
@@ -78,6 +79,31 @@ const CRM_PROVIDERS = [
   },
 ];
 
+// Calendar Provider definitions
+const CALENDAR_PROVIDERS = [
+  {
+    id: 'google',
+    name: 'Google Calendar',
+    description: 'Sync with your Google Calendar',
+    color: '#4285f4',
+    features: ['Events', 'Availability', 'Meetings'],
+  },
+  {
+    id: 'outlook',
+    name: 'Microsoft Outlook',
+    description: 'Sync with Outlook/Office 365',
+    color: '#0078d4',
+    features: ['Events', 'Availability', 'Teams'],
+  },
+  {
+    id: 'calendly',
+    name: 'Calendly',
+    description: 'Connect your Calendly account',
+    color: '#006bff',
+    features: ['Event Types', 'Scheduling', 'Bookings'],
+  },
+];
+
 // Voice preview cache
 const voicePreviewCache: Record<string, string> = {};
 
@@ -97,6 +123,25 @@ interface CRMIntegration {
 }
 
 interface CRMProvider {
+  id: string;
+  name: string;
+  description: string;
+  connected: boolean;
+  enabled: boolean;
+  configured: boolean;
+}
+
+interface CalendarIntegration {
+  id: string;
+  provider: string;
+  enabled: boolean;
+  calendarName?: string;
+  defaultDuration?: number;
+  lastSyncAt?: string;
+  connectedBy?: { name: string; email: string };
+}
+
+interface CalendarProvider {
   id: string;
   name: string;
   description: string;
@@ -529,6 +574,8 @@ export function SettingsPage() {
 function IntegrationsTab({ setMessage }: { setMessage: (msg: { type: 'success' | 'error'; text: string } | null) => void }) {
   const [providers, setProviders] = useState<CRMProvider[]>([]);
   const [integrations, setIntegrations] = useState<CRMIntegration[]>([]);
+  const [calendarProviders, setCalendarProviders] = useState<CalendarProvider[]>([]);
+  const [calendarIntegrations, setCalendarIntegrations] = useState<CalendarIntegration[]>([]);
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [showWebhookModal, setShowWebhookModal] = useState(false);
@@ -536,21 +583,25 @@ function IntegrationsTab({ setMessage }: { setMessage: (msg: { type: 'success' |
   const [webhookSecret, setWebhookSecret] = useState('');
   const [savingWebhook, setSavingWebhook] = useState(false);
 
-  // Fetch CRM providers and integrations
+  // Fetch CRM and Calendar providers and integrations
   useEffect(() => {
     fetchData();
   }, []);
 
   const fetchData = async () => {
     try {
-      const [providersRes, integrationsRes] = await Promise.all([
+      const [providersRes, integrationsRes, calProvidersRes, calIntegrationsRes] = await Promise.all([
         api.get<{ providers: CRMProvider[] }>('/api/crm/providers'),
         api.get<{ integrations: CRMIntegration[] }>('/api/crm/integrations'),
+        api.get<{ providers: CalendarProvider[] }>('/api/calendar/providers').catch(() => ({ providers: [] })),
+        api.get<{ integrations: CalendarIntegration[] }>('/api/calendar/integrations').catch(() => ({ integrations: [] })),
       ]);
       setProviders(providersRes.providers || []);
       setIntegrations(integrationsRes.integrations || []);
+      setCalendarProviders(calProvidersRes.providers || []);
+      setCalendarIntegrations(calIntegrationsRes.integrations || []);
     } catch (err) {
-      console.error('Failed to load CRM data:', err);
+      console.error('Failed to load integration data:', err);
     } finally {
       setLoading(false);
     }
@@ -585,6 +636,36 @@ function IntegrationsTab({ setMessage }: { setMessage: (msg: { type: 'success' |
     } catch (err) {
       setMessage({ type: 'error', text: 'Failed to disconnect' });
     }
+  };
+
+  const connectCalendar = async (providerId: string) => {
+    setConnecting(`cal-${providerId}`);
+    try {
+      const response = await api.get<{ authUrl: string }>(`/api/calendar/connect/${providerId}`);
+      if (response.authUrl) {
+        window.location.href = response.authUrl;
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: `Failed to connect to ${providerId}` });
+    } finally {
+      setConnecting(null);
+    }
+  };
+
+  const disconnectCalendar = async (integrationId: string, providerName: string) => {
+    if (!confirm(`Are you sure you want to disconnect ${providerName}?`)) return;
+
+    try {
+      await api.delete(`/api/calendar/integrations/${integrationId}`);
+      setCalendarIntegrations(prev => prev.filter(i => i.id !== integrationId));
+      setMessage({ type: 'success', text: `${providerName} disconnected` });
+    } catch (err) {
+      setMessage({ type: 'error', text: 'Failed to disconnect' });
+    }
+  };
+
+  const getCalendarProviderInfo = (providerId: string) => {
+    return CALENDAR_PROVIDERS.find(p => p.id === providerId.toLowerCase());
   };
 
   const saveWebhook = async () => {
@@ -774,6 +855,114 @@ function IntegrationsTab({ setMessage }: { setMessage: (msg: { type: 'success' |
                     `}
                   >
                     {connecting === provider.id ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <>
+                        <ExternalLink size={16} />
+                        {isConfigured ? 'Connect' : 'Not Configured'}
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Calendar Integrations */}
+      <div>
+        <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+          <Calendar size={20} className="text-emerald-400" />
+          Calendar Integrations
+        </h3>
+        <p className="text-sm text-slate-400 mb-4">
+          Connect your calendar for appointment scheduling and availability management
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {CALENDAR_PROVIDERS.map((provider) => {
+            const isConnected = calendarIntegrations.some(i => i.provider.toLowerCase() === provider.id);
+            const apiProvider = calendarProviders.find(p => p.id === provider.id);
+            const isConfigured = apiProvider?.configured !== false;
+            const integration = calendarIntegrations.find(i => i.provider.toLowerCase() === provider.id);
+
+            return (
+              <div
+                key={provider.id}
+                className={`
+                  p-5 rounded-xl border transition-all
+                  ${isConnected
+                    ? 'bg-slate-800/30 border-emerald-500/30'
+                    : 'bg-slate-800/50 border-slate-700 hover:border-slate-600'
+                  }
+                `}
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold"
+                      style={{ backgroundColor: provider.color }}
+                    >
+                      {provider.name[0]}
+                    </div>
+                    <div>
+                      <h4 className="font-medium text-white">{provider.name}</h4>
+                      <p className="text-xs text-slate-400">{provider.description}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {isConnected && (
+                  <div className="mb-3">
+                    <span className="text-xs px-2 py-1 rounded-full bg-emerald-500/20 text-emerald-400">
+                      Connected
+                    </span>
+                    {integration?.calendarName && (
+                      <p className="text-xs text-slate-500 mt-2">
+                        Calendar: {integration.calendarName}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-1.5 mb-4">
+                  {provider.features.map(feature => (
+                    <span key={feature} className="text-xs px-2 py-0.5 rounded bg-slate-700/50 text-slate-400">
+                      {feature}
+                    </span>
+                  ))}
+                </div>
+
+                {isConnected ? (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {}}
+                      className="flex-1 py-2 rounded-lg bg-slate-700/50 hover:bg-slate-700 text-slate-300 text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Settings2 size={14} />
+                      Settings
+                    </button>
+                    <button
+                      onClick={() => disconnectCalendar(integration!.id, provider.name)}
+                      className="p-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors"
+                      title="Disconnect"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => connectCalendar(provider.id)}
+                    disabled={connecting === `cal-${provider.id}` || !isConfigured}
+                    className={`
+                      w-full py-2.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2
+                      ${isConfigured
+                        ? 'bg-slate-700 hover:bg-slate-600 text-white'
+                        : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                      }
+                    `}
+                  >
+                    {connecting === `cal-${provider.id}` ? (
                       <Loader2 size={16} className="animate-spin" />
                     ) : (
                       <>

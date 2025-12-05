@@ -45,10 +45,12 @@ const PLANS = [
       { text: '300 AI minutes/mo', included: true },
       { text: '2 team members', included: true },
       { text: '1 phone number', included: true },
+      { text: 'AI Receptionist with barge-in', included: true },
+      { text: 'Lead capture & management', included: true },
       { text: 'Basic analytics', included: true },
       { text: 'Email support', included: true },
-      { text: 'Priority support', included: false },
-      { text: 'API access', included: false },
+      { text: 'CRM integrations', included: false },
+      { text: 'Calendar integrations', included: false },
     ],
     popular: false,
     cta: 'Get Started',
@@ -65,10 +67,12 @@ const PLANS = [
       { text: '2,000 AI minutes/mo', included: true },
       { text: '10 team members', included: true },
       { text: '5 phone numbers', included: true },
+      { text: 'AI Receptionist with barge-in', included: true },
+      { text: 'Lead capture & management', included: true },
+      { text: 'CRM integrations (HubSpot, Salesforce, Zoho, Pipedrive)', included: true },
+      { text: 'Calendar integrations (Google, Outlook, Calendly)', included: true },
       { text: 'Advanced analytics', included: true },
       { text: 'Priority support', included: true },
-      { text: 'Overage protection', included: true },
-      { text: 'API access', included: true },
     ],
     popular: true,
     cta: 'Upgrade Now',
@@ -85,10 +89,12 @@ const PLANS = [
       { text: '4,000 AI minutes/mo', included: true },
       { text: '20 team members', included: true },
       { text: '5 phone numbers', included: true },
-      { text: 'Enterprise analytics', included: true },
-      { text: 'Dedicated support', included: true },
-      { text: 'BYO API keys', included: true },
+      { text: 'Everything in Business Pro', included: true },
+      { text: 'Custom webhooks & API access', included: true },
+      { text: 'BYO API keys (OpenAI, Deepgram)', included: true },
+      { text: 'Dedicated account manager', included: true },
       { text: 'White-label & custom domain', included: true },
+      { text: 'Enterprise SLA & support', included: true },
     ],
     popular: false,
     cta: 'Get Scale',
@@ -989,19 +995,19 @@ export function BillingPage() {
               <div className="mt-8 flex flex-wrap justify-center gap-8 text-sm text-slate-500">
                 <span className="flex items-center gap-2">
                   <CheckCircle size={16} className="text-emerald-500" />
-                  7-day free trial
-                </span>
-                <span className="flex items-center gap-2">
-                  <CheckCircle size={16} className="text-emerald-500" />
-                  Cancel anytime
-                </span>
-                <span className="flex items-center gap-2">
-                  <CheckCircle size={16} className="text-emerald-500" />
                   No hidden fees
                 </span>
                 <span className="flex items-center gap-2">
                   <Shield size={16} className="text-emerald-500" />
                   Secure payments via Stripe
+                </span>
+                <span className="flex items-center gap-2">
+                  <CheckCircle size={16} className="text-emerald-500" />
+                  24/7 AI receptionist
+                </span>
+                <span className="flex items-center gap-2">
+                  <CheckCircle size={16} className="text-emerald-500" />
+                  USA & Canada coverage
                 </span>
               </div>
             </div>

@@ -446,4 +446,54 @@ router.get("/calendars", authMiddleware, async (req, res) => {
   }
 });
 
+// ============================================================================
+// GET /api/calendar/providers
+// List available calendar providers with their status
+// ============================================================================
+router.get("/providers", authMiddleware, async (req, res) => {
+  try {
+    const integrations = await prisma.calendarIntegration.findMany({
+      where: { organizationId: req.organizationId },
+      select: { provider: true, enabled: true },
+    });
+
+    const connectedProviders = new Map(integrations.map((i) => [i.provider, i.enabled]));
+
+    const providers = [
+      {
+        id: "google",
+        name: "Google Calendar",
+        description: "Sync with your Google Calendar",
+        icon: "google",
+        connected: connectedProviders.has("GOOGLE"),
+        enabled: connectedProviders.get("GOOGLE") || false,
+        configured: !!process.env.GOOGLE_CLIENT_ID,
+      },
+      {
+        id: "outlook",
+        name: "Microsoft Outlook",
+        description: "Sync with Outlook/Office 365",
+        icon: "outlook",
+        connected: connectedProviders.has("OUTLOOK"),
+        enabled: connectedProviders.get("OUTLOOK") || false,
+        configured: !!process.env.MICROSOFT_CLIENT_ID,
+      },
+      {
+        id: "calendly",
+        name: "Calendly",
+        description: "Connect your Calendly account",
+        icon: "calendly",
+        connected: connectedProviders.has("CALENDLY"),
+        enabled: connectedProviders.get("CALENDLY") || false,
+        configured: !!process.env.CALENDLY_CLIENT_ID,
+      },
+    ];
+
+    res.json({ providers });
+  } catch (error) {
+    console.error("❌ Get providers error:", error);
+    res.status(500).json({ error: "Failed to fetch providers" });
+  }
+});
+
 module.exports = router;

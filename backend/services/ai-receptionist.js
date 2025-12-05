@@ -443,30 +443,29 @@ class AIReceptionist {
       console.log("🔁 Transferring to human with hold music...");
       this.transferredToHuman = true;
 
-      // Close Deepgram connection
+      // Close Deepgram connection first
       if (this.deepgramWs) {
-        this.deepgramWs.close();
+        try {
+          this.deepgramWs.send(JSON.stringify({ type: "CloseStream" }));
+          this.deepgramWs.close();
+        } catch (e) {}
       }
+      this.deepgramReady = false;
 
       const callerId = this.toNumber || process.env.TWILIO_NUMBER;
+      const transferUrl = `${process.env.PUBLIC_BASE_URL}/twilio/transfer/initiate?callerId=${encodeURIComponent(callerId)}`;
 
+      // Redirect the call to a transfer endpoint instead of updating TwiML directly
+      // This works better with media streams
       await this.twilioClient.calls(this.callSid).update({
-        twiml: `
-          <Response>
-            <Play loop="10">${HOLD_MUSIC_URL}</Play>
-            <Dial callerId="${callerId}" timeout="30" action="${process.env.PUBLIC_BASE_URL}/twilio/transfer/status">
-              <Client>web-user</Client>
-            </Dial>
-            <Say voice="Polly.Amy">We're sorry, no one is available right now. Please leave a message after the beep.</Say>
-            <Record maxLength="120" transcribe="true" />
-          </Response>
-        `,
+        url: transferUrl,
+        method: "POST",
       });
 
-      console.log("✅ Transfer initiated with hold music");
+      console.log("✅ Transfer initiated - redirecting to:", transferUrl);
     } catch (err) {
       console.error("❌ Transfer error:", err.message);
-      await this.speak("I apologize, I'm having trouble connecting you. Please try calling back in a moment.");
+      // Don't try to speak - the call state might be unstable
     }
   }
 

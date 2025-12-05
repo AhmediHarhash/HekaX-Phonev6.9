@@ -323,6 +323,85 @@ router.post(
 );
 
 // ============================================================================
+// POST /twilio/transfer/initiate
+// Handle transfer from AI receptionist to human agent
+// ============================================================================
+
+router.post(
+  "/transfer/initiate",
+  validateTwilioWebhookFlexible,
+  async (req, res) => {
+    const callerId = req.query.callerId || process.env.TWILIO_NUMBER;
+    const { CallSid, From, To } = req.body;
+
+    console.log("🔁 Transfer initiate:", { CallSid, From, To, callerId });
+
+    const twiml = new VoiceResponse();
+
+    // Play hold music while connecting
+    twiml.play(
+      { loop: 10 },
+      "http://com.twilio.sounds.music.s3.amazonaws.com/MARKOVICHAMP-B8.mp3"
+    );
+
+    // Dial the web client
+    const dial = twiml.dial({
+      callerId: callerId,
+      timeout: 30,
+      action: `${process.env.PUBLIC_BASE_URL}/twilio/transfer/status`,
+    });
+    dial.client("web-user");
+
+    // Fallback if no one answers
+    twiml.say(
+      { voice: "Polly.Amy" },
+      "We're sorry, no one is available right now. Please leave a message after the beep."
+    );
+    twiml.record({ maxLength: 120, transcribe: true });
+
+    res.type("text/xml");
+    res.send(twiml.toString());
+  }
+);
+
+// ============================================================================
+// POST /twilio/transfer/status
+// Handle transfer completion status
+// ============================================================================
+
+router.post(
+  "/transfer/status",
+  validateTwilioWebhookFlexible,
+  async (req, res) => {
+    const { CallSid, DialCallStatus, DialCallDuration } = req.body;
+    console.log("📞 Transfer status:", { CallSid, DialCallStatus, DialCallDuration });
+
+    const twiml = new VoiceResponse();
+
+    if (DialCallStatus === "completed" || DialCallStatus === "answered") {
+      // Call was answered and completed normally
+      twiml.hangup();
+    } else if (DialCallStatus === "busy" || DialCallStatus === "no-answer" || DialCallStatus === "failed") {
+      // No one answered - offer voicemail
+      twiml.say(
+        { voice: "Polly.Amy" },
+        "We're sorry, no one is available. Please leave a message after the beep."
+      );
+      twiml.record({
+        maxLength: 120,
+        transcribe: true,
+        recordingStatusCallback: `${process.env.PUBLIC_BASE_URL}/twilio/recording/callback`,
+      });
+    } else {
+      twiml.hangup();
+    }
+
+    res.type("text/xml");
+    res.send(twiml.toString());
+  }
+);
+
+// ============================================================================
 // POST /twilio/voice/fallback
 // Fallback handler when primary voice URL fails
 // ============================================================================

@@ -3,21 +3,24 @@
 // ============================================================================
 
 import { useState } from 'react';
-import { 
-  Phone, 
-  PhoneOff, 
-  Mic, 
+import {
+  Phone,
+  PhoneOff,
+  Mic,
   MicOff,
   Clock,
   PhoneIncoming,
   X,
   Check,
   Delete,
+  AlertCircle,
+  CreditCard,
 } from 'lucide-react';
 import { PageHeader } from '../components/layout';
-import { Card } from '../components/common';
+import { Card, Button } from '../components/common';
 import { useTwilio } from '../hooks/useTwilio';
-import { formatDuration, formatPhoneNumber } from '../utils/formatters';
+import { useAuth } from '../context/AuthContext';
+import { formatDuration } from '../utils/formatters';
 
 const DIAL_PAD = [
   ['1', '2', '3'],
@@ -27,6 +30,13 @@ const DIAL_PAD = [
 ];
 
 export function SoftphonePage() {
+  const { org } = useAuth();
+  const isTrial = !org?.plan || org.plan === 'TRIAL';
+  const hasPhoneNumber = !!org?.twilioNumber;
+
+  // Only initialize Twilio if user is not on trial and has a phone number
+  const twilioEnabled = !isTrial && hasPhoneNumber;
+
   const {
     status,
     statusMessage,
@@ -41,7 +51,7 @@ export function SoftphonePage() {
     acceptIncoming,
     rejectIncoming,
     sendDigits,
-  } = useTwilio();
+  } = useTwilio({ enabled: twilioEnabled });
 
   const [phoneNumber, setPhoneNumber] = useState('');
 
@@ -65,6 +75,68 @@ export function SoftphonePage() {
     }
   };
 
+  // Show upgrade prompt for trial users
+  if (isTrial) {
+    return (
+      <div className="flex justify-center pt-8">
+        <Card className="w-full max-w-md text-center">
+          <div className="py-8">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-blue-500/10 flex items-center justify-center">
+              <Phone size={32} className="text-blue-400" />
+            </div>
+            <h2 className="text-xl font-bold text-white mb-2">Softphone</h2>
+            <p className="text-slate-400 mb-6">
+              Make and receive calls directly from your browser.
+              Upgrade to a paid plan to unlock this feature.
+            </p>
+            <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl mb-6">
+              <div className="flex items-center gap-3 text-amber-400">
+                <AlertCircle size={20} />
+                <span className="text-sm font-medium">Free Trial</span>
+              </div>
+              <p className="text-sm text-slate-400 mt-2">
+                The softphone requires an active subscription and a purchased phone number.
+              </p>
+            </div>
+            <Button
+              onClick={() => window.dispatchEvent(new CustomEvent('navigate', { detail: 'billing' }))}
+              className="w-full"
+            >
+              <CreditCard size={18} />
+              Upgrade Now
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  // Show no phone number message
+  if (!hasPhoneNumber) {
+    return (
+      <div className="flex justify-center pt-8">
+        <Card className="w-full max-w-md text-center">
+          <div className="py-8">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-slate-700 flex items-center justify-center">
+              <Phone size={32} className="text-slate-400" />
+            </div>
+            <h2 className="text-xl font-bold text-white mb-2">No Phone Number</h2>
+            <p className="text-slate-400 mb-6">
+              You need to add a phone number before you can use the softphone.
+            </p>
+            <Button
+              onClick={() => window.dispatchEvent(new CustomEvent('navigate', { detail: 'phone-numbers' }))}
+              className="w-full"
+            >
+              <Phone size={18} />
+              Add Phone Number
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="flex justify-center pt-8">
       <Card className="w-full max-w-sm">
@@ -72,7 +144,7 @@ export function SoftphonePage() {
         <div className="text-center mb-6">
           <h2 className="text-xl font-bold text-white mb-2">Softphone</h2>
           <div className="flex items-center justify-center gap-2">
-            <div 
+            <div
               className={`w-2.5 h-2.5 rounded-full ${
                 status === 'ready' ? 'bg-emerald-500' :
                 status === 'connected' ? 'bg-blue-500 animate-pulse' :

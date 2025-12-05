@@ -5,6 +5,7 @@
 
 import { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { PreferencesProvider } from './context/PreferencesContext';
 import { Sidebar } from './components/layout';
 import { LoadingSpinner, CreateOrgModal } from './components/common';
 import {
@@ -146,8 +147,10 @@ function AppContent() {
 // Root App with providers
 export default function App() {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <PreferencesProvider>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </PreferencesProvider>
   );
 }

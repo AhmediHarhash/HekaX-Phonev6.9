@@ -32,21 +32,34 @@ interface UseTwilioReturn {
   sendDigits: (digits: string) => void;
 }
 
-export function useTwilio(): UseTwilioReturn {
+interface UseTwilioOptions {
+  enabled?: boolean;
+}
+
+export function useTwilio(options: UseTwilioOptions = {}): UseTwilioReturn {
+  const { enabled = true } = options;
+
   const [device, setDevice] = useState<TwilioDevice | null>(null);
   const [activeCall, setActiveCall] = useState<TwilioCall | null>(null);
   const [incomingCall, setIncomingCall] = useState<TwilioCall | null>(null);
-  const [status, setStatus] = useState<TwilioStatus>('initializing');
-  const [statusMessage, setStatusMessage] = useState('Initializing...');
+  const [status, setStatus] = useState<TwilioStatus>(enabled ? 'initializing' : 'disconnected');
+  const [statusMessage, setStatusMessage] = useState(enabled ? 'Initializing...' : 'Softphone disabled');
   const [isRegistered, setIsRegistered] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
-  
+
   const timerRef = useRef<number | null>(null);
   const deviceRef = useRef<TwilioDevice | null>(null);
 
   // Initialize Twilio Device
   useEffect(() => {
+    // Skip initialization if not enabled
+    if (!enabled) {
+      setStatus('disconnected');
+      setStatusMessage('Softphone disabled');
+      return;
+    }
+
     let mounted = true;
 
     const setupDevice = async () => {
@@ -129,7 +142,7 @@ export function useTwilio(): UseTwilioReturn {
         deviceRef.current.destroy();
       }
     };
-  }, []);
+  }, [enabled]);
 
   // Handle call events
   const setupCallEvents = useCallback((call: TwilioCall) => {

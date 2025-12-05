@@ -23,6 +23,7 @@ import { useAuth } from '../context/AuthContext';
 import { PageHeader } from '../components/layout';
 import { Card, Button } from '../components/common';
 import { orgApi, api } from '../utils/api';
+import { usePreferences } from '../context/PreferencesContext';
 
 // Voice options with descriptions
 const VOICE_OPTIONS = [
@@ -71,6 +72,7 @@ export function SettingsPage() {
     // Stop current playback
     if (audioRef.current) {
       audioRef.current.pause();
+      audioRef.current.src = '';
       audioRef.current = null;
       setPlayingVoice(null);
     }
@@ -81,40 +83,86 @@ export function SettingsPage() {
     }
 
     setLoadingVoice(voice);
+    setMessage(null);
 
     try {
       let audioUrl = voicePreviewCache[voice];
 
       // If not cached, request from backend
       if (!audioUrl) {
+        console.log('Fetching voice preview for:', voice);
         const response = await api.post<{ audioUrl: string }>('/api/voice/preview', {
           voiceId: voice,
           text: 'Hi, thank you for calling. How may I help you today?',
         });
+        console.log('Got response:', response);
+
+        if (!response.audioUrl) {
+          throw new Error('No audio URL received from server');
+        }
+
         audioUrl = response.audioUrl;
         voicePreviewCache[voice] = audioUrl;
       }
 
-      const audio = new Audio(audioUrl);
+      // Create audio element
+      const audio = new Audio();
       audioRef.current = audio;
 
+      // Set up promise-based loading
+      const loadPromise = new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Audio loading timeout'));
+        }, 10000);
+
+        audio.oncanplaythrough = () => {
+          clearTimeout(timeout);
+          resolve();
+        };
+
+        audio.onerror = () => {
+          clearTimeout(timeout);
+          reject(new Error('Failed to load audio'));
+        };
+      });
+
       audio.onended = () => {
+        console.log('Audio playback ended');
         setPlayingVoice(null);
       };
 
-      audio.onerror = () => {
-        console.error('Audio playback error');
-        setPlayingVoice(null);
+      // Set source and start loading
+      audio.src = audioUrl;
+      audio.load();
+
+      // Wait for audio to be ready
+      await loadPromise;
+
+      // Try to play
+      try {
+        await audio.play();
+        console.log('Audio playing successfully');
+        setPlayingVoice(voice);
         setLoadingVoice(null);
+      } catch (playErr) {
+        console.error('Play error:', playErr);
+        setLoadingVoice(null);
+        // Clear cache on play error
         delete voicePreviewCache[voice];
-      };
+        setMessage({ type: 'error', text: 'Click the play button again to hear the voice' });
+      }
 
-      await audio.play();
-      setPlayingVoice(voice);
-      setLoadingVoice(null);
     } catch (err) {
       console.error('Voice preview error:', err);
       setLoadingVoice(null);
+      // Clear cache on error
+      delete voicePreviewCache[voice];
+
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load voice preview';
+      setMessage({
+        type: 'error',
+        text: errorMessage.includes('OpenAI') ? errorMessage : `Voice preview unavailable: ${errorMessage}`
+      });
     }
   };
 
@@ -430,131 +478,7 @@ export function SettingsPage() {
         )}
 
         {/* Preferences Tab */}
-        {activeTab === 'preferences' && (
-          <div className="space-y-6">
-            <h3 className="text-lg font-semibold text-white mb-4">User Preferences</h3>
-
-            {/* Theme Selection */}
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-3">
-                Theme
-              </label>
-              <div className="flex gap-3 max-w-md">
-                <button
-                  onClick={() => {
-                    document.documentElement.classList.remove('light');
-                    localStorage.setItem('theme', 'dark');
-                  }}
-                  className="flex-1 p-4 rounded-xl border border-slate-700 bg-slate-900 hover:border-blue-500 transition-colors group"
-                >
-                  <div className="flex items-center justify-center gap-2">
-                    <Moon size={20} className="text-slate-400 group-hover:text-blue-400" />
-                    <span className="text-white font-medium">Dark</span>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-2">Easier on the eyes</p>
-                </button>
-                <button
-                  disabled
-                  className="flex-1 p-4 rounded-xl border border-slate-700 bg-slate-800/50 opacity-50 cursor-not-allowed"
-                >
-                  <div className="flex items-center justify-center gap-2">
-                    <Sun size={20} className="text-slate-500" />
-                    <span className="text-slate-400 font-medium">Light</span>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-2">Coming soon</p>
-                </button>
-              </div>
-              <p className="mt-2 text-sm text-slate-500">
-                Light mode will be available in a future update
-              </p>
-            </div>
-
-            {/* Timezone */}
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
-                Timezone
-              </label>
-              <select
-                defaultValue="America/New_York"
-                className="
-                  w-full max-w-md px-4 py-2.5 rounded-lg
-                  bg-slate-900 border border-slate-700
-                  text-white
-                  focus:outline-none focus:border-blue-500
-                "
-              >
-                <option value="America/New_York">Eastern Time (ET)</option>
-                <option value="America/Chicago">Central Time (CT)</option>
-                <option value="America/Denver">Mountain Time (MT)</option>
-                <option value="America/Los_Angeles">Pacific Time (PT)</option>
-                <option value="America/Phoenix">Arizona (MST)</option>
-                <option value="Pacific/Honolulu">Hawaii (HST)</option>
-                <option value="America/Anchorage">Alaska (AKST)</option>
-                <option value="Europe/London">London (GMT)</option>
-                <option value="Europe/Paris">Paris (CET)</option>
-                <option value="Asia/Tokyo">Tokyo (JST)</option>
-              </select>
-              <p className="mt-1.5 text-sm text-slate-500">
-                Used for displaying times and scheduling
-              </p>
-            </div>
-
-            {/* Compact Mode */}
-            <div className="flex items-center justify-between max-w-md">
-              <div>
-                <label className="text-sm font-medium text-slate-300">
-                  Compact Mode
-                </label>
-                <p className="text-sm text-slate-500">
-                  Show more content with smaller spacing
-                </p>
-              </div>
-              <label className="relative inline-block w-12 h-6 cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="sr-only peer"
-                />
-                <div className="
-                  w-12 h-6 rounded-full
-                  bg-slate-700 peer-checked:bg-blue-600
-                  transition-colors
-                " />
-                <div className="
-                  absolute left-1 top-1 w-4 h-4 rounded-full bg-white
-                  transition-transform peer-checked:translate-x-6
-                " />
-              </label>
-            </div>
-
-            {/* Sound Effects */}
-            <div className="flex items-center justify-between max-w-md">
-              <div>
-                <label className="text-sm font-medium text-slate-300">
-                  Sound Effects
-                </label>
-                <p className="text-sm text-slate-500">
-                  Play sounds for notifications and actions
-                </p>
-              </div>
-              <label className="relative inline-block w-12 h-6 cursor-pointer">
-                <input
-                  type="checkbox"
-                  defaultChecked
-                  className="sr-only peer"
-                />
-                <div className="
-                  w-12 h-6 rounded-full
-                  bg-slate-700 peer-checked:bg-emerald-600
-                  transition-colors
-                " />
-                <div className="
-                  absolute left-1 top-1 w-4 h-4 rounded-full bg-white
-                  transition-transform peer-checked:translate-x-6
-                " />
-              </label>
-            </div>
-          </div>
-        )}
+        {activeTab === 'preferences' && <PreferencesTab />}
 
         {/* Save Button */}
         <div className="mt-8 pt-6 border-t border-slate-700">
@@ -573,6 +497,132 @@ export function SettingsPage() {
           </Button>
         </div>
       </Card>
+    </div>
+  );
+}
+
+// Preferences Tab Component
+function PreferencesTab() {
+  const { preferences, setTheme, setCompactMode, setTimezone } = usePreferences();
+
+  return (
+    <div className="space-y-6">
+      <h3 className="text-lg font-semibold text-white mb-4">User Preferences</h3>
+
+      {/* Theme Selection */}
+      <div>
+        <label className="block text-sm font-medium text-slate-300 mb-3">
+          Theme
+        </label>
+        <div className="flex gap-3 max-w-md">
+          <button
+            onClick={() => setTheme('dark')}
+            className={`
+              flex-1 p-4 rounded-xl border transition-all
+              ${preferences.theme === 'dark'
+                ? 'border-blue-500 bg-blue-500/10 shadow-lg shadow-blue-500/10'
+                : 'border-slate-700 bg-slate-800/50 hover:border-slate-600'
+              }
+            `}
+          >
+            <div className="flex items-center justify-center gap-2">
+              <Moon size={20} className={preferences.theme === 'dark' ? 'text-blue-400' : 'text-slate-400'} />
+              <span className="text-white font-medium">Dark</span>
+            </div>
+            <p className="text-xs text-slate-500 mt-2">Easier on the eyes</p>
+            {preferences.theme === 'dark' && (
+              <div className="mt-2 text-xs text-blue-400 font-medium">Active</div>
+            )}
+          </button>
+          <button
+            onClick={() => setTheme('light')}
+            className={`
+              flex-1 p-4 rounded-xl border transition-all
+              ${preferences.theme === 'light'
+                ? 'border-blue-500 bg-blue-500/10 shadow-lg shadow-blue-500/10'
+                : 'border-slate-700 bg-slate-800/50 hover:border-slate-600'
+              }
+            `}
+          >
+            <div className="flex items-center justify-center gap-2">
+              <Sun size={20} className={preferences.theme === 'light' ? 'text-amber-400' : 'text-slate-400'} />
+              <span className="text-white font-medium">Light</span>
+            </div>
+            <p className="text-xs text-slate-500 mt-2">Clean & bright</p>
+            {preferences.theme === 'light' && (
+              <div className="mt-2 text-xs text-blue-400 font-medium">Active</div>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Timezone */}
+      <div>
+        <label className="block text-sm font-medium text-slate-300 mb-2">
+          Timezone
+        </label>
+        <select
+          value={preferences.timezone}
+          onChange={(e) => setTimezone(e.target.value)}
+          className="
+            w-full max-w-md px-4 py-2.5 rounded-lg
+            bg-slate-900 border border-slate-700
+            text-white
+            focus:outline-none focus:border-blue-500
+          "
+        >
+          <option value="America/New_York">Eastern Time (ET)</option>
+          <option value="America/Chicago">Central Time (CT)</option>
+          <option value="America/Denver">Mountain Time (MT)</option>
+          <option value="America/Los_Angeles">Pacific Time (PT)</option>
+          <option value="America/Phoenix">Arizona (MST)</option>
+          <option value="Pacific/Honolulu">Hawaii (HST)</option>
+          <option value="America/Anchorage">Alaska (AKST)</option>
+          <option value="Europe/London">London (GMT)</option>
+          <option value="Europe/Paris">Paris (CET)</option>
+          <option value="Asia/Tokyo">Tokyo (JST)</option>
+          <option value="Asia/Dubai">Dubai (GST)</option>
+          <option value="Asia/Singapore">Singapore (SGT)</option>
+          <option value="Australia/Sydney">Sydney (AEST)</option>
+        </select>
+        <p className="mt-1.5 text-sm text-slate-500">
+          Used for displaying times and scheduling
+        </p>
+      </div>
+
+      {/* Compact Mode */}
+      <div className="flex items-center justify-between max-w-md p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+        <div>
+          <label className="text-sm font-medium text-white">
+            Compact Mode
+          </label>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Reduce spacing for more content on screen
+          </p>
+        </div>
+        <label className="relative inline-block w-12 h-6 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={preferences.compactMode}
+            onChange={(e) => setCompactMode(e.target.checked)}
+            className="sr-only peer"
+          />
+          <div className="
+            w-12 h-6 rounded-full
+            bg-slate-700 peer-checked:bg-blue-600
+            transition-colors
+          " />
+          <div className="
+            absolute left-1 top-1 w-4 h-4 rounded-full bg-white
+            transition-transform peer-checked:translate-x-6
+          " />
+        </label>
+      </div>
+
+      {/* Preferences are auto-saved notice */}
+      <p className="text-xs text-slate-500 mt-4">
+        Preferences are saved automatically to your browser
+      </p>
     </div>
   );
 }

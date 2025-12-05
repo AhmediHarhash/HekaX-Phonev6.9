@@ -1,11 +1,11 @@
 // ============================================================================
 // HEKAX Phone - Billing Page
-// Phase 6.8 + 6.9: Add-On Purchases + Usage Alerts UI
+// Professional SaaS Design with Enhanced UX
 // ============================================================================
 
 import { useState, useEffect } from 'react';
-import { 
-  CreditCard, 
+import {
+  CreditCard,
   Phone,
   Bot,
   AlertTriangle,
@@ -18,10 +18,17 @@ import {
   Package,
   Settings,
   Plus,
+  Sparkles,
+  Shield,
+  Zap,
+  Crown,
+  ArrowRight,
+  Mail,
+  Building2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { PageHeader } from '../components/layout';
-import { Card, LoadingSpinner, Badge, Modal, Button } from '../components/common';
+import { Card, LoadingSpinner, Badge } from '../components/common';
 import { api } from '../utils/api';
 
 // Plans configuration for the upgrade modal
@@ -30,48 +37,61 @@ const PLANS = [
     id: 'STARTER',
     name: 'Starter',
     price: 99,
-    description: 'Perfect for small businesses',
+    description: 'Perfect for small teams getting started',
+    icon: Zap,
+    color: 'blue',
     features: [
-      '1,000 call minutes/mo',
-      '300 AI minutes/mo',
-      '2 team members',
-      '1 phone number',
-      'Basic analytics',
+      { text: '1,000 call minutes/mo', included: true },
+      { text: '300 AI minutes/mo', included: true },
+      { text: '2 team members', included: true },
+      { text: '1 phone number', included: true },
+      { text: 'Basic analytics', included: true },
+      { text: 'Email support', included: true },
+      { text: 'Priority support', included: false },
+      { text: 'API access', included: false },
     ],
     popular: false,
+    cta: 'Get Started',
   },
   {
     id: 'BUSINESS_PRO',
     name: 'Business Pro',
     price: 499,
-    description: 'For growing businesses',
+    description: 'For growing businesses that need more',
+    icon: Sparkles,
+    color: 'purple',
     features: [
-      '4,000 call minutes/mo',
-      '2,000 AI minutes/mo',
-      '10 team members',
-      '5 phone numbers',
-      'Advanced analytics',
-      'Priority support',
-      'Overage protection',
+      { text: '4,000 call minutes/mo', included: true },
+      { text: '2,000 AI minutes/mo', included: true },
+      { text: '10 team members', included: true },
+      { text: '5 phone numbers', included: true },
+      { text: 'Advanced analytics', included: true },
+      { text: 'Priority support', included: true },
+      { text: 'Overage protection', included: true },
+      { text: 'API access', included: true },
     ],
     popular: true,
+    cta: 'Upgrade Now',
   },
   {
     id: 'SCALE',
     name: 'Scale',
     price: 799,
     description: 'For high-volume operations',
+    icon: Crown,
+    color: 'amber',
     features: [
-      '8,000 call minutes/mo',
-      '4,000 AI minutes/mo',
-      '20 team members',
-      '5 phone numbers',
-      'Enterprise analytics',
-      'Dedicated support',
-      'Overage protection',
-      'Custom integrations',
+      { text: '8,000 call minutes/mo', included: true },
+      { text: '4,000 AI minutes/mo', included: true },
+      { text: '20 team members', included: true },
+      { text: '5 phone numbers', included: true },
+      { text: 'Enterprise analytics', included: true },
+      { text: 'Dedicated support', included: true },
+      { text: 'BYO API keys', included: true },
+      { text: 'White-label & custom domain', included: true },
     ],
     popular: false,
+    cta: 'Get Scale',
   },
 ];
 
@@ -285,14 +305,14 @@ export function BillingPage() {
   };
 
   return (
-    <div>
+    <div className="animate-fade-in">
       <PageHeader
         title="Billing & Usage"
         subtitle="Manage your subscription and monitor usage"
         actions={
-          <button 
+          <button
             onClick={fetchBilling}
-            className="p-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors"
+            className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all hover:scale-105 border border-slate-700"
           >
             <RefreshCw size={18} />
           </button>
@@ -303,12 +323,12 @@ export function BillingPage() {
       {billing.alerts.length > 0 && (
         <div className="space-y-3 mb-6">
           {billing.alerts.map(alert => (
-            <div 
+            <div
               key={alert.id}
               className={`
-                p-4 rounded-lg flex items-start gap-3
-                ${alert.severity === 'error' 
-                  ? 'bg-red-500/10 border border-red-500/20' 
+                p-4 rounded-xl flex items-start gap-3 backdrop-blur-sm
+                ${alert.severity === 'error'
+                  ? 'bg-red-500/10 border border-red-500/20'
                   : alert.severity === 'warning'
                     ? 'bg-amber-500/10 border border-amber-500/20'
                     : 'bg-blue-500/10 border border-blue-500/20'
@@ -330,7 +350,6 @@ export function BillingPage() {
                   {alert.title}
                 </p>
                 <p className="text-sm text-slate-400 mt-1">{alert.message}</p>
-                {/* Action buttons for usage alerts */}
                 {alert.type.includes('usage') && alert.severity !== 'info' && (
                   <div className="flex gap-2 mt-3">
                     <button
@@ -352,7 +371,7 @@ export function BillingPage() {
               </div>
               <button
                 onClick={() => handleDismissAlert(alert.id)}
-                className="text-slate-500 hover:text-slate-300"
+                className="text-slate-500 hover:text-slate-300 transition-colors"
               >
                 <X size={18} />
               </button>
@@ -363,130 +382,163 @@ export function BillingPage() {
 
       {/* Trial Banner */}
       {billing.trial && (
-        <Card className="mb-6 bg-gradient-to-r from-blue-600/20 to-purple-600/20 border-blue-500/30">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-semibold text-white">Trial Period</h3>
-              <p className="text-slate-300">
-                {billing.trial.daysLeft > 0 
-                  ? `${billing.trial.daysLeft} days remaining`
-                  : 'Your trial has ended'
-                }
-              </p>
+        <div className="mb-6 p-6 rounded-2xl bg-gradient-to-r from-blue-600/20 via-purple-600/20 to-pink-600/20 border border-blue-500/30 backdrop-blur-sm relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 to-purple-500/5" />
+          <div className="relative flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center shadow-lg shadow-blue-500/25">
+                <Sparkles size={24} className="text-white" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-white">Free Trial Active</h3>
+                <p className="text-slate-300">
+                  {billing.trial.daysLeft > 0
+                    ? `${billing.trial.daysLeft} days remaining to explore all features`
+                    : 'Your trial has ended - upgrade to continue'
+                  }
+                </p>
+              </div>
             </div>
             {canManage && (
               <button
                 onClick={() => setShowPlansModal(true)}
                 disabled={actionLoading}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
+                className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white rounded-xl font-semibold transition-all hover:scale-105 shadow-lg shadow-blue-500/25 disabled:opacity-50 flex items-center gap-2"
               >
-                {actionLoading ? <RefreshCw size={18} className="animate-spin" /> : 'Choose a Plan'}
+                {actionLoading ? <RefreshCw size={18} className="animate-spin" /> : (
+                  <>
+                    Choose a Plan
+                    <ArrowRight size={18} />
+                  </>
+                )}
               </button>
             )}
           </div>
-        </Card>
+        </div>
       )}
 
-      {/* Plan & Subscription */}
+      {/* Plan & Subscription Card */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-        <Card className="lg:col-span-2">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h3 className="text-lg font-semibold text-white">
-                {billing.plan.id === 'TRIAL' ? 'Free Trial' : billing.plan.name}
-              </h3>
-              <p className="text-slate-400">
-                {billing.plan.id === 'TRIAL' || billing.plan.price === 0
-                  ? 'Explore all features before subscribing'
-                  : `$${billing.plan.price}/month`
-                }
-              </p>
-            </div>
-            {billing.subscription ? (
-              <Badge variant={getStatusColor(billing.subscription.status)}>
-                {billing.subscription.status}
-              </Badge>
-            ) : billing.plan.id === 'TRIAL' && (
-              <Badge variant="info">Trial</Badge>
-            )}
-          </div>
-
-          {billing.subscription && (
-            <div className="grid grid-cols-2 gap-4 mb-6 p-4 bg-slate-900/50 rounded-lg">
-              <div>
-                <p className="text-xs text-slate-500 mb-1">Current Period</p>
-                <p className="text-sm text-slate-300">
-                  {new Date(billing.subscription.currentPeriodStart).toLocaleDateString()} 
-                  {' → '}
-                  {new Date(billing.subscription.currentPeriodEnd).toLocaleDateString()}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 mb-1">Next Billing</p>
-                <p className="text-sm text-slate-300">
-                  {billing.subscription.cancelAtPeriodEnd 
-                    ? 'Cancelled' 
-                    : new Date(billing.subscription.currentPeriodEnd).toLocaleDateString()
+        <Card className="lg:col-span-2 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-blue-500/10 to-purple-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
+          <div className="relative">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-4">
+                <div className={`
+                  w-12 h-12 rounded-xl flex items-center justify-center
+                  ${billing.plan.id === 'SCALE'
+                    ? 'bg-gradient-to-br from-amber-500 to-orange-500 shadow-lg shadow-amber-500/25'
+                    : billing.plan.id === 'BUSINESS_PRO'
+                      ? 'bg-gradient-to-br from-purple-500 to-pink-500 shadow-lg shadow-purple-500/25'
+                      : 'bg-gradient-to-br from-blue-500 to-cyan-500 shadow-lg shadow-blue-500/25'
                   }
-                </p>
+                `}>
+                  {billing.plan.id === 'SCALE' ? <Crown size={24} className="text-white" /> :
+                   billing.plan.id === 'BUSINESS_PRO' ? <Sparkles size={24} className="text-white" /> :
+                   <Zap size={24} className="text-white" />}
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-white">
+                    {billing.plan.id === 'TRIAL' ? 'Free Trial' : billing.plan.name}
+                  </h3>
+                  <p className="text-slate-400">
+                    {billing.plan.id === 'TRIAL' || billing.plan.price === 0
+                      ? 'Explore all features before subscribing'
+                      : `$${billing.plan.price}/month`
+                    }
+                  </p>
+                </div>
               </div>
-            </div>
-          )}
-
-          {canManage && (
-            <div className="flex gap-3">
-              {!billing.subscription || billing.plan.id === 'TRIAL' ? (
-                <button
-                  onClick={() => setShowPlansModal(true)}
-                  disabled={actionLoading}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
-                >
-                  Choose a Plan
-                </button>
-              ) : (
-                <>
-                  <button
-                    onClick={handleManageBilling}
-                    disabled={actionLoading}
-                    className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
-                  >
-                    <CreditCard size={18} />
-                    Manage Billing
-                  </button>
-                  {billing.plan.id !== 'SCALE' && (
-                    <button
-                      onClick={() => setShowPlansModal(true)}
-                      disabled={actionLoading}
-                      className="px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
-                    >
-                      Upgrade
-                    </button>
-                  )}
-                </>
+              {billing.subscription ? (
+                <Badge variant={getStatusColor(billing.subscription.status)}>
+                  {billing.subscription.status}
+                </Badge>
+              ) : billing.plan.id === 'TRIAL' && (
+                <Badge variant="info">Trial</Badge>
               )}
             </div>
-          )}
+
+            {billing.subscription && (
+              <div className="grid grid-cols-2 gap-4 mb-6 p-4 bg-slate-900/50 rounded-xl border border-slate-700/50">
+                <div>
+                  <p className="text-xs text-slate-500 mb-1 uppercase tracking-wide">Current Period</p>
+                  <p className="text-sm text-slate-300 font-medium">
+                    {new Date(billing.subscription.currentPeriodStart).toLocaleDateString()}
+                    {' - '}
+                    {new Date(billing.subscription.currentPeriodEnd).toLocaleDateString()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 mb-1 uppercase tracking-wide">Next Billing</p>
+                  <p className="text-sm text-slate-300 font-medium">
+                    {billing.subscription.cancelAtPeriodEnd
+                      ? 'Cancelled'
+                      : new Date(billing.subscription.currentPeriodEnd).toLocaleDateString()
+                    }
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {canManage && (
+              <div className="flex gap-3">
+                {!billing.subscription || billing.plan.id === 'TRIAL' ? (
+                  <button
+                    onClick={() => setShowPlansModal(true)}
+                    disabled={actionLoading}
+                    className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white rounded-xl font-semibold transition-all hover:scale-105 shadow-lg shadow-blue-500/20 disabled:opacity-50 flex items-center gap-2"
+                  >
+                    Choose a Plan
+                    <ArrowRight size={16} />
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={handleManageBilling}
+                      disabled={actionLoading}
+                      className="px-5 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-medium transition-all hover:scale-105 disabled:opacity-50 flex items-center gap-2 border border-slate-600"
+                    >
+                      <CreditCard size={18} />
+                      Manage Billing
+                    </button>
+                    {billing.plan.id !== 'SCALE' && (
+                      <button
+                        onClick={() => setShowPlansModal(true)}
+                        disabled={actionLoading}
+                        className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white rounded-xl font-semibold transition-all hover:scale-105 shadow-lg shadow-blue-500/20 disabled:opacity-50"
+                      >
+                        Upgrade
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </Card>
 
         {/* Quick Stats */}
-        <Card>
-          <h3 className="font-semibold text-white mb-4">Plan Limits</h3>
-          <div className="space-y-3">
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-400">Call Minutes</span>
-              <span className="text-white">{billing.usage.callMinutes.limit.toLocaleString()}/mo</span>
+        <Card className="bg-gradient-to-br from-slate-800 to-slate-900">
+          <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
+            <Shield size={18} className="text-blue-400" />
+            Plan Limits
+          </h3>
+          <div className="space-y-4">
+            <div className="flex justify-between items-center p-3 bg-slate-900/50 rounded-lg">
+              <span className="text-slate-400 text-sm">Call Minutes</span>
+              <span className="text-white font-semibold">{billing.usage.callMinutes.limit.toLocaleString()}/mo</span>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-400">AI Minutes</span>
-              <span className="text-white">{billing.usage.aiMinutes.limit.toLocaleString()}/mo</span>
+            <div className="flex justify-between items-center p-3 bg-slate-900/50 rounded-lg">
+              <span className="text-slate-400 text-sm">AI Minutes</span>
+              <span className="text-white font-semibold">{billing.usage.aiMinutes.limit.toLocaleString()}/mo</span>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-400">Team Members</span>
-              <span className="text-white">{billing.usage.users.limit}</span>
+            <div className="flex justify-between items-center p-3 bg-slate-900/50 rounded-lg">
+              <span className="text-slate-400 text-sm">Team Members</span>
+              <span className="text-white font-semibold">{billing.usage.users.limit}</span>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-400">Phone Numbers</span>
-              <span className="text-white">{billing.usage.phoneNumbers.limit}</span>
+            <div className="flex justify-between items-center p-3 bg-slate-900/50 rounded-lg">
+              <span className="text-slate-400 text-sm">Phone Numbers</span>
+              <span className="text-white font-semibold">{billing.usage.phoneNumbers.limit}</span>
             </div>
           </div>
         </Card>
@@ -495,135 +547,143 @@ export function BillingPage() {
       {/* Usage Meters */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         {/* Call Minutes */}
-        <Card>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-500/15 flex items-center justify-center">
-                <Phone size={20} className="text-blue-400" />
+        <Card className="relative overflow-hidden group hover:shadow-lg hover:shadow-blue-500/5 transition-all">
+          <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+          <div className="relative">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-600/20 flex items-center justify-center border border-blue-500/20">
+                  <Phone size={22} className="text-blue-400" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-white">Call Minutes</h3>
+                  <p className="text-sm text-slate-400">US & Canada</p>
+                </div>
               </div>
-              <div>
-                <h3 className="font-semibold text-white">Call Minutes</h3>
-                <p className="text-sm text-slate-400">US & Canada</p>
+              <div className="text-right">
+                <p className="text-3xl font-bold text-white">
+                  {billing.usage.callMinutes.used.toLocaleString()}
+                </p>
+                <p className="text-sm text-slate-400">
+                  of {billing.usage.callMinutes.limit.toLocaleString()}
+                </p>
               </div>
             </div>
-            <div className="text-right">
-              <p className="text-2xl font-bold text-white">
-                {billing.usage.callMinutes.used.toLocaleString()}
-              </p>
-              <p className="text-sm text-slate-400">
-                of {billing.usage.callMinutes.limit.toLocaleString()}
-              </p>
+            <div className="w-full h-3 bg-slate-700/50 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-700 ${
+                  billing.usage.callMinutes.percent >= 90 ? 'bg-gradient-to-r from-red-500 to-red-400' :
+                  billing.usage.callMinutes.percent >= 80 ? 'bg-gradient-to-r from-amber-500 to-amber-400' :
+                  'bg-gradient-to-r from-blue-500 to-blue-400'
+                }`}
+                style={{ width: `${Math.min(billing.usage.callMinutes.percent, 100)}%` }}
+              />
             </div>
-          </div>
-          <div className="w-full h-3 bg-slate-700 rounded-full overflow-hidden">
-            <div 
-              className={`h-full rounded-full transition-all duration-500 ${
-                billing.usage.callMinutes.percent >= 90 ? 'bg-red-500' :
-                billing.usage.callMinutes.percent >= 80 ? 'bg-amber-500' :
-                'bg-gradient-to-r from-blue-500 to-blue-400'
-              }`}
-              style={{ width: `${Math.min(billing.usage.callMinutes.percent, 100)}%` }}
-            />
-          </div>
-          <div className="flex justify-between mt-2">
-            <p className="text-sm text-slate-500">
-              {billing.usage.callMinutes.remaining.toLocaleString()} remaining
-            </p>
-            {billing.usage.callMinutes.addonRemaining && billing.usage.callMinutes.addonRemaining > 0 && (
-              <p className="text-sm text-blue-400">
-                +{billing.usage.callMinutes.addonRemaining.toLocaleString()} add-on
+            <div className="flex justify-between mt-3">
+              <p className="text-sm text-slate-500">
+                {billing.usage.callMinutes.remaining.toLocaleString()} remaining
               </p>
-            )}
+              {billing.usage.callMinutes.addonRemaining && billing.usage.callMinutes.addonRemaining > 0 && (
+                <p className="text-sm text-blue-400 font-medium">
+                  +{billing.usage.callMinutes.addonRemaining.toLocaleString()} add-on
+                </p>
+              )}
+            </div>
           </div>
         </Card>
 
         {/* AI Minutes */}
-        <Card>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-purple-500/15 flex items-center justify-center">
-                <Bot size={20} className="text-purple-400" />
+        <Card className="relative overflow-hidden group hover:shadow-lg hover:shadow-purple-500/5 transition-all">
+          <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+          <div className="relative">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500/20 to-purple-600/20 flex items-center justify-center border border-purple-500/20">
+                  <Bot size={22} className="text-purple-400" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-white">AI Minutes</h3>
+                  <p className="text-sm text-slate-400">STT + LLM + TTS</p>
+                </div>
               </div>
-              <div>
-                <h3 className="font-semibold text-white">AI Minutes</h3>
-                <p className="text-sm text-slate-400">STT + LLM + TTS</p>
+              <div className="text-right">
+                <p className="text-3xl font-bold text-white">
+                  {billing.usage.aiMinutes.used.toLocaleString()}
+                </p>
+                <p className="text-sm text-slate-400">
+                  of {billing.usage.aiMinutes.limit.toLocaleString()}
+                </p>
               </div>
             </div>
-            <div className="text-right">
-              <p className="text-2xl font-bold text-white">
-                {billing.usage.aiMinutes.used.toLocaleString()}
-              </p>
-              <p className="text-sm text-slate-400">
-                of {billing.usage.aiMinutes.limit.toLocaleString()}
-              </p>
+            <div className="w-full h-3 bg-slate-700/50 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-700 ${
+                  billing.usage.aiMinutes.percent >= 90 ? 'bg-gradient-to-r from-red-500 to-red-400' :
+                  billing.usage.aiMinutes.percent >= 80 ? 'bg-gradient-to-r from-amber-500 to-amber-400' :
+                  'bg-gradient-to-r from-purple-500 to-purple-400'
+                }`}
+                style={{ width: `${Math.min(billing.usage.aiMinutes.percent, 100)}%` }}
+              />
             </div>
-          </div>
-          <div className="w-full h-3 bg-slate-700 rounded-full overflow-hidden">
-            <div 
-              className={`h-full rounded-full transition-all duration-500 ${
-                billing.usage.aiMinutes.percent >= 90 ? 'bg-red-500' :
-                billing.usage.aiMinutes.percent >= 80 ? 'bg-amber-500' :
-                'bg-gradient-to-r from-purple-500 to-purple-400'
-              }`}
-              style={{ width: `${Math.min(billing.usage.aiMinutes.percent, 100)}%` }}
-            />
-          </div>
-          <div className="flex justify-between mt-2">
-            {billing.usage.aiMinutes.inGracePeriod ? (
-              <p className="text-sm text-amber-400">
-                ⚠️ Grace period active - AI will pause after 48 hours
-              </p>
-            ) : (
-              <p className="text-sm text-slate-500">
-                {billing.usage.aiMinutes.remaining.toLocaleString()} remaining
-              </p>
-            )}
-            {billing.usage.aiMinutes.addonRemaining && billing.usage.aiMinutes.addonRemaining > 0 && (
-              <p className="text-sm text-purple-400">
-                +{billing.usage.aiMinutes.addonRemaining.toLocaleString()} add-on
-              </p>
-            )}
+            <div className="flex justify-between mt-3">
+              {billing.usage.aiMinutes.inGracePeriod ? (
+                <p className="text-sm text-amber-400 flex items-center gap-1">
+                  <AlertTriangle size={14} />
+                  Grace period - AI pauses after 48hrs
+                </p>
+              ) : (
+                <p className="text-sm text-slate-500">
+                  {billing.usage.aiMinutes.remaining.toLocaleString()} remaining
+                </p>
+              )}
+              {billing.usage.aiMinutes.addonRemaining && billing.usage.aiMinutes.addonRemaining > 0 && (
+                <p className="text-sm text-purple-400 font-medium">
+                  +{billing.usage.aiMinutes.addonRemaining.toLocaleString()} add-on
+                </p>
+              )}
+            </div>
           </div>
         </Card>
       </div>
 
       {/* Overage Settings */}
       {billing.plan.id !== 'TRIAL' && billing.usage.overage && canManage && (
-        <Card className="mb-6">
+        <Card className="mb-6 bg-gradient-to-r from-amber-500/5 to-orange-500/5 border-amber-500/20">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/15 flex items-center justify-center">
-                <Settings size={20} className="text-amber-400" />
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 flex items-center justify-center border border-amber-500/20">
+                <Settings size={22} className="text-amber-400" />
               </div>
               <div>
-                <h3 className="font-semibold text-white">Overage Settings</h3>
+                <h3 className="font-semibold text-white">Overage Protection</h3>
                 <p className="text-sm text-slate-400">
-                  {billing.usage.overage.enabled 
-                    ? `Enabled - cap $${billing.usage.overage.capDollars}/month`
-                    : 'Disabled - AI will pause when limits hit'
+                  {billing.usage.overage.enabled
+                    ? `Continue using AI beyond limits (capped at $${billing.usage.overage.capDollars}/mo)`
+                    : 'AI will pause when limits are reached'
                   }
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-6">
               {billing.usage.overage.enabled && (
                 <div className="text-right">
-                  <p className="text-sm text-slate-400">Used this period</p>
-                  <p className="text-lg font-semibold text-white">
-                    ${billing.usage.overage.usedDollars.toFixed(2)} / ${billing.usage.overage.capDollars}
+                  <p className="text-xs text-slate-500 uppercase tracking-wide">Used this period</p>
+                  <p className="text-lg font-bold text-white">
+                    ${billing.usage.overage.usedDollars.toFixed(2)}
+                    <span className="text-slate-400 font-normal text-sm"> / ${billing.usage.overage.capDollars}</span>
                   </p>
                 </div>
               )}
               <button
                 onClick={handleToggleOverage}
                 className={`
-                  relative w-12 h-6 rounded-full transition-colors
-                  ${billing.usage.overage.enabled ? 'bg-blue-600' : 'bg-slate-600'}
+                  relative w-14 h-7 rounded-full transition-colors
+                  ${billing.usage.overage.enabled ? 'bg-amber-600' : 'bg-slate-600'}
                 `}
               >
                 <div className={`
-                  absolute top-1 w-4 h-4 rounded-full bg-white transition-transform
-                  ${billing.usage.overage.enabled ? 'left-7' : 'left-1'}
+                  absolute top-1 w-5 h-5 rounded-full bg-white transition-all shadow-lg
+                  ${billing.usage.overage.enabled ? 'left-8' : 'left-1'}
                 `} />
               </button>
             </div>
@@ -635,31 +695,31 @@ export function BillingPage() {
       {billing.addons && billing.addons.length > 0 && (
         <Card className="mb-6" id="addons-section">
           <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 rounded-xl bg-green-500/15 flex items-center justify-center">
-              <Package size={20} className="text-green-400" />
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500/20 to-green-500/20 flex items-center justify-center border border-emerald-500/20">
+              <Package size={22} className="text-emerald-400" />
             </div>
             <div>
-              <h3 className="font-semibold text-white">Buy More Minutes</h3>
-              <p className="text-sm text-slate-400">One-time add-on packs</p>
+              <h3 className="font-semibold text-white">Need More Minutes?</h3>
+              <p className="text-sm text-slate-400">One-time add-on packs that never expire</p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {billing.addons.map(addon => (
-              <div 
+              <div
                 key={addon.id}
-                className="p-4 bg-slate-900/50 rounded-lg border border-slate-700 hover:border-slate-600 transition-colors"
+                className="p-5 bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl border border-slate-700 hover:border-emerald-500/50 transition-all hover:shadow-lg hover:shadow-emerald-500/5 group"
               >
                 <div className="flex justify-between items-start mb-3">
-                  <h4 className="font-medium text-white">{addon.name}</h4>
-                  <span className="text-lg font-bold text-green-400">${addon.price}</span>
+                  <h4 className="font-semibold text-white group-hover:text-emerald-400 transition-colors">{addon.name}</h4>
+                  <span className="text-2xl font-bold text-emerald-400">${addon.price}</span>
                 </div>
                 <p className="text-sm text-slate-400 mb-4">{addon.description}</p>
                 {canManage && (
                   <button
                     onClick={() => handleBuyAddon(addon.id)}
                     disabled={addonLoading === addon.id}
-                    className="w-full py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition-all disabled:opacity-50 flex items-center justify-center gap-2 group-hover:shadow-lg group-hover:shadow-emerald-500/20"
                   >
                     {addonLoading === addon.id ? (
                       <RefreshCw size={16} className="animate-spin" />
@@ -679,12 +739,17 @@ export function BillingPage() {
 
       {/* Invoices */}
       <Card>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-white">Invoice History</h3>
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-slate-700/50 flex items-center justify-center">
+              <FileText size={18} className="text-slate-400" />
+            </div>
+            <h3 className="font-semibold text-white">Invoice History</h3>
+          </div>
           {billing.subscription && canManage && (
             <button
               onClick={handleManageBilling}
-              className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1"
+              className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors"
             >
               View All <ExternalLink size={14} />
             </button>
@@ -692,25 +757,35 @@ export function BillingPage() {
         </div>
 
         {invoices.length === 0 ? (
-          <p className="text-center text-slate-500 py-8">No invoices yet</p>
+          <div className="text-center py-12 text-slate-500">
+            <FileText size={40} className="mx-auto mb-3 opacity-50" />
+            <p>No invoices yet</p>
+            <p className="text-sm mt-1">Invoices will appear here after your first payment</p>
+          </div>
         ) : (
           <div className="space-y-2">
             {invoices.slice(0, 5).map(invoice => (
-              <div 
+              <div
                 key={invoice.id}
-                className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg"
+                className="flex items-center justify-between p-4 bg-slate-900/50 rounded-xl hover:bg-slate-900/80 transition-colors"
               >
                 <div className="flex items-center gap-3">
-                  <FileText size={18} className="text-slate-500" />
+                  <div className="w-10 h-10 rounded-lg bg-slate-800 flex items-center justify-center">
+                    <FileText size={18} className="text-slate-400" />
+                  </div>
                   <div>
-                    <p className="text-sm font-medium text-white">{invoice.number}</p>
+                    <p className="font-medium text-white">{invoice.number}</p>
                     <p className="text-xs text-slate-500">
-                      {new Date(invoice.created).toLocaleDateString()}
+                      {new Date(invoice.created).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric'
+                      })}
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
-                  <span className="text-sm font-medium text-white">
+                  <span className="text-lg font-semibold text-white">
                     ${invoice.amount.toFixed(2)}
                   </span>
                   <Badge variant={invoice.status === 'paid' ? 'success' : 'warning'}>
@@ -721,7 +796,7 @@ export function BillingPage() {
                       href={invoice.pdfUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-blue-400 hover:text-blue-300"
+                      className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-blue-400 transition-colors"
                     >
                       <ExternalLink size={16} />
                     </a>
@@ -733,87 +808,214 @@ export function BillingPage() {
         )}
       </Card>
 
-      {/* Plans Selection Modal */}
-      <Modal
-        isOpen={showPlansModal}
-        onClose={() => setShowPlansModal(false)}
-        title="Choose Your Plan"
-        size="lg"
-      >
-        <div className="space-y-4">
-          <p className="text-slate-400 text-sm mb-6">
-            Select the plan that best fits your business needs. All plans include a 7-day free trial.
-          </p>
+      {/* Plans Selection Modal - Professional SaaS Design */}
+      {showPlansModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          {/* Backdrop with blur */}
+          <div
+            className="absolute inset-0 bg-black/80 backdrop-blur-md"
+            onClick={() => setShowPlansModal(false)}
+          />
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {PLANS.map((plan) => {
-              const isCurrentPlan = billing?.plan.id === plan.id;
-              const isDowngrade = billing?.plan.id === 'SCALE' ||
-                (billing?.plan.id === 'BUSINESS_PRO' && plan.id === 'STARTER');
+          {/* Modal */}
+          <div className="relative w-full max-w-6xl max-h-[90vh] overflow-auto bg-gradient-to-b from-slate-900 to-slate-950 rounded-3xl border border-slate-700/50 shadow-2xl shadow-black/50">
+            {/* Close button */}
+            <button
+              onClick={() => setShowPlansModal(false)}
+              className="absolute top-6 right-6 p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all z-10"
+            >
+              <X size={20} />
+            </button>
 
-              return (
-                <div
-                  key={plan.id}
-                  className={`
-                    relative p-5 rounded-xl border transition-all
-                    ${plan.popular
-                      ? 'border-blue-500 bg-blue-500/5'
-                      : 'border-slate-700 bg-slate-800/50'
-                    }
-                    ${isCurrentPlan ? 'ring-2 ring-emerald-500' : ''}
-                  `}
-                >
-                  {plan.popular && (
-                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-blue-600 text-white text-xs font-medium rounded-full">
-                      Most Popular
+            {/* Header */}
+            <div className="text-center pt-12 pb-8 px-6 border-b border-slate-800/50">
+              <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-full text-blue-400 text-sm font-medium mb-4">
+                <Sparkles size={14} />
+                Simple, transparent pricing
+              </div>
+              <h2 className="text-4xl font-bold text-white mb-3">
+                Choose Your Plan
+              </h2>
+              <p className="text-slate-400 max-w-xl mx-auto text-lg">
+                Scale your business with the right plan. All plans include a 7-day free trial.
+              </p>
+            </div>
+
+            {/* Plans Grid */}
+            <div className="p-8 lg:p-10">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {PLANS.map((plan) => {
+                  const isCurrentPlan = billing?.plan.id === plan.id;
+                  const isDowngrade = billing?.plan.id === 'SCALE' ||
+                    (billing?.plan.id === 'BUSINESS_PRO' && plan.id === 'STARTER');
+                  const Icon = plan.icon;
+
+                  return (
+                    <div
+                      key={plan.id}
+                      className={`
+                        relative rounded-2xl overflow-hidden transition-all duration-300
+                        ${plan.popular
+                          ? 'ring-2 ring-purple-500 shadow-2xl shadow-purple-500/20 scale-[1.02]'
+                          : 'ring-1 ring-slate-700 hover:ring-slate-600'
+                        }
+                        ${isCurrentPlan ? 'ring-2 ring-emerald-500' : ''}
+                      `}
+                    >
+                      {/* Popular Badge */}
+                      {plan.popular && (
+                        <div className="absolute top-0 left-0 right-0 bg-gradient-to-r from-purple-600 to-pink-600 text-white text-center py-2.5 text-sm font-semibold flex items-center justify-center gap-2">
+                          <Sparkles size={14} />
+                          Most Popular
+                        </div>
+                      )}
+
+                      {/* Current Plan Badge */}
+                      {isCurrentPlan && !plan.popular && (
+                        <div className="absolute top-0 left-0 right-0 bg-emerald-600 text-white text-center py-2.5 text-sm font-semibold flex items-center justify-center gap-2">
+                          <CheckCircle size={14} />
+                          Current Plan
+                        </div>
+                      )}
+
+                      <div className={`p-6 lg:p-8 ${plan.popular || isCurrentPlan ? 'pt-14' : ''} bg-gradient-to-b from-slate-800/50 to-slate-900/80`}>
+                        {/* Plan Icon & Header */}
+                        <div className="text-center mb-6">
+                          <div className={`
+                            inline-flex w-14 h-14 rounded-2xl items-center justify-center mb-4
+                            ${plan.color === 'amber' ? 'bg-gradient-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/30' :
+                              plan.color === 'purple' ? 'bg-gradient-to-br from-purple-500/20 to-pink-500/20 border border-purple-500/30' :
+                              'bg-gradient-to-br from-blue-500/20 to-cyan-500/20 border border-blue-500/30'
+                            }
+                          `}>
+                            <Icon size={26} className={
+                              plan.color === 'amber' ? 'text-amber-400' :
+                              plan.color === 'purple' ? 'text-purple-400' : 'text-blue-400'
+                            } />
+                          </div>
+                          <h3 className="text-2xl font-bold text-white mb-2">{plan.name}</h3>
+                          <p className="text-sm text-slate-400">{plan.description}</p>
+                        </div>
+
+                        {/* Price */}
+                        <div className="text-center mb-8 py-6 rounded-xl bg-slate-900/50 border border-slate-700/50">
+                          <div className="flex items-baseline justify-center gap-1">
+                            <span className="text-slate-400 text-2xl">$</span>
+                            <span className="text-5xl font-bold text-white">{plan.price}</span>
+                          </div>
+                          <p className="text-slate-500 text-sm mt-2">per month, billed monthly</p>
+                        </div>
+
+                        {/* Features */}
+                        <ul className="space-y-3 mb-8">
+                          {plan.features.map((feature, i) => (
+                            <li
+                              key={i}
+                              className={`flex items-center gap-3 text-sm ${
+                                feature.included ? 'text-slate-300' : 'text-slate-500'
+                              }`}
+                            >
+                              {feature.included ? (
+                                <CheckCircle size={18} className="text-emerald-400 flex-shrink-0" />
+                              ) : (
+                                <XCircle size={18} className="text-slate-600 flex-shrink-0" />
+                              )}
+                              <span className={!feature.included ? 'line-through' : ''}>
+                                {feature.text}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+
+                        {/* CTA Button */}
+                        <button
+                          onClick={() => {
+                            setShowPlansModal(false);
+                            handleUpgrade(plan.id);
+                          }}
+                          disabled={actionLoading || isCurrentPlan}
+                          className={`
+                            w-full py-3.5 px-4 rounded-xl font-semibold text-sm
+                            transition-all duration-200 transform flex items-center justify-center gap-2
+                            ${isCurrentPlan
+                              ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                              : plan.popular
+                                ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-500 hover:to-pink-500 hover:scale-[1.02] shadow-lg shadow-purple-500/25'
+                                : 'bg-slate-700 text-white hover:bg-slate-600'
+                            }
+                            disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100
+                          `}
+                        >
+                          {actionLoading ? (
+                            <RefreshCw size={18} className="animate-spin" />
+                          ) : isCurrentPlan ? (
+                            'Current Plan'
+                          ) : isDowngrade ? (
+                            'Contact Support'
+                          ) : (
+                            <>
+                              {plan.cta}
+                              <ArrowRight size={16} />
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
-                  )}
-                  {isCurrentPlan && (
-                    <div className="absolute -top-3 right-4 px-3 py-1 bg-emerald-600 text-white text-xs font-medium rounded-full">
-                      Current Plan
+                  );
+                })}
+              </div>
+
+              {/* Enterprise CTA */}
+              <div className="mt-10 p-8 rounded-2xl bg-gradient-to-r from-slate-800/80 via-purple-900/20 to-slate-800/80 border border-slate-700/50 relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-r from-purple-500/5 via-pink-500/5 to-purple-500/5" />
+                <div className="relative flex flex-col lg:flex-row items-center justify-between gap-6">
+                  <div className="flex items-center gap-4 text-center lg:text-left">
+                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 border border-purple-500/30 flex items-center justify-center">
+                      <Building2 size={28} className="text-purple-400" />
                     </div>
-                  )}
-
-                  <div className="mb-4">
-                    <h3 className="text-lg font-semibold text-white">{plan.name}</h3>
-                    <p className="text-sm text-slate-400">{plan.description}</p>
+                    <div>
+                      <h4 className="text-xl font-bold text-white mb-1">Need a custom enterprise solution?</h4>
+                      <p className="text-slate-400">
+                        Get custom limits, dedicated support, SLA guarantees, and more.
+                      </p>
+                    </div>
                   </div>
-
-                  <div className="mb-4">
-                    <span className="text-3xl font-bold text-white">${plan.price}</span>
-                    <span className="text-slate-400">/month</span>
-                  </div>
-
-                  <ul className="space-y-2 mb-6">
-                    {plan.features.map((feature, i) => (
-                      <li key={i} className="flex items-center gap-2 text-sm text-slate-300">
-                        <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />
-                        {feature}
-                      </li>
-                    ))}
-                  </ul>
-
-                  <Button
-                    onClick={() => {
-                      setShowPlansModal(false);
-                      handleUpgrade(plan.id);
-                    }}
-                    disabled={actionLoading || isCurrentPlan}
-                    className="w-full"
-                    variant={plan.popular ? 'primary' : 'secondary'}
+                  <a
+                    href="mailto:support@hekax.com?subject=Enterprise%20Plan%20Inquiry&body=Hi%20HEKAX%20Team,%0A%0AI'm%20interested%20in%20learning%20more%20about%20your%20enterprise%20plans.%0A%0ACompany:%20%0AExpected%20call%20volume:%20%0ASpecific%20requirements:%20%0A%0AThank%20you!"
+                    className="inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-semibold rounded-xl transition-all hover:scale-105 shadow-lg shadow-purple-500/25 whitespace-nowrap"
                   >
-                    {isCurrentPlan ? 'Current Plan' : isDowngrade ? 'Contact Support' : 'Select Plan'}
-                  </Button>
+                    <Mail size={18} />
+                    Contact Sales
+                  </a>
                 </div>
-              );
-            })}
-          </div>
+                <p className="relative text-slate-500 text-sm mt-4 text-center lg:text-left">
+                  Email us at <span className="text-purple-400">support@hekax.com</span> for custom pricing
+                </p>
+              </div>
 
-          <p className="text-center text-xs text-slate-500 mt-4">
-            Need more? Contact us for custom enterprise pricing.
-          </p>
+              {/* Trust badges */}
+              <div className="mt-8 flex flex-wrap justify-center gap-8 text-sm text-slate-500">
+                <span className="flex items-center gap-2">
+                  <CheckCircle size={16} className="text-emerald-500" />
+                  7-day free trial
+                </span>
+                <span className="flex items-center gap-2">
+                  <CheckCircle size={16} className="text-emerald-500" />
+                  Cancel anytime
+                </span>
+                <span className="flex items-center gap-2">
+                  <CheckCircle size={16} className="text-emerald-500" />
+                  No hidden fees
+                </span>
+                <span className="flex items-center gap-2">
+                  <Shield size={16} className="text-emerald-500" />
+                  Secure payments via Stripe
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
-      </Modal>
+      )}
     </div>
   );
 }

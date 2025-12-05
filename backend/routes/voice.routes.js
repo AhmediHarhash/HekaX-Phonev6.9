@@ -20,32 +20,36 @@ const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 router.post("/preview", authMiddleware, async (req, res) => {
   try {
     const { voiceId, text } = req.body;
+    console.log("🎙️ Voice preview request:", { voiceId, text: text?.substring(0, 50) });
 
     if (!voiceId) {
       return res.status(400).json({ error: "Voice ID required" });
     }
 
     const previewText = text || "Hi, thank you for calling. How may I help you today?";
-    
+
     // Check cache
     const cacheKey = `${voiceId}-${previewText}`;
     const cached = voiceCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      console.log("✅ Returning cached voice preview for:", voiceId);
       return res.json({ audioUrl: cached.audioUrl });
     }
 
     // Validate voice ID (OpenAI voices - includes all available TTS voices)
-    // Note: "sage" is a newer OpenAI voice, "fable" is still valid but less commonly used
     const validVoices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer", "sage"];
     if (!validVoices.includes(voiceId)) {
+      console.error("❌ Invalid voice ID:", voiceId);
       return res.status(400).json({ error: "Invalid voice ID" });
     }
 
     const { OPENAI_API_KEY } = process.env;
     if (!OPENAI_API_KEY) {
+      console.error("❌ OpenAI API key not configured");
       return res.status(500).json({ error: "OpenAI not configured" });
     }
 
+    console.log("🔄 Generating voice preview with OpenAI TTS...");
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
     // Generate speech
@@ -57,7 +61,9 @@ router.post("/preview", authMiddleware, async (req, res) => {
 
     // Convert to base64 data URL
     const buffer = Buffer.from(await mp3.arrayBuffer());
-    const audioUrl = `data:audio/mp3;base64,${buffer.toString("base64")}`;
+    const audioUrl = `data:audio/mpeg;base64,${buffer.toString("base64")}`;
+
+    console.log("✅ Voice preview generated, size:", buffer.length, "bytes");
 
     // Cache the result
     voiceCache.set(cacheKey, {
@@ -79,18 +85,21 @@ router.post("/preview", authMiddleware, async (req, res) => {
   } catch (err) {
     console.error("❌ Voice preview error:", err.message);
     console.error("❌ Full error:", err);
-    
+
     // Return more specific error messages
-    if (err.message?.includes("API key")) {
+    if (err.message?.includes("API key") || err.message?.includes("Incorrect API key")) {
       return res.status(500).json({ error: "OpenAI API key invalid or missing" });
     }
-    if (err.message?.includes("rate limit")) {
+    if (err.message?.includes("rate limit") || err.code === "rate_limit_exceeded") {
       return res.status(429).json({ error: "Rate limit exceeded, try again later" });
     }
-    if (err.message?.includes("insufficient_quota")) {
+    if (err.message?.includes("insufficient_quota") || err.code === "insufficient_quota") {
       return res.status(402).json({ error: "OpenAI quota exceeded" });
     }
-    
+    if (err.code === "ENOTFOUND" || err.code === "ECONNREFUSED") {
+      return res.status(503).json({ error: "Cannot connect to OpenAI service" });
+    }
+
     res.status(500).json({ error: "Failed to generate voice preview" });
   }
 });

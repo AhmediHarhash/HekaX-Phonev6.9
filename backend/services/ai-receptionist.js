@@ -368,11 +368,13 @@ class AIReceptionist {
         this.transferredToHuman = true;
         await this.speak(reply);
 
-        setTimeout(() => {
-          this.transferToHumanWithMusic().catch(err => {
-            console.error("❌ Transfer failed:", err.message);
-          });
-        }, 800);
+        // Wait for TTS audio to fully play on caller's end (network delay)
+        // The speak() function sends audio but caller needs time to hear it
+        console.log("⏳ Waiting for TTS to play before transfer...");
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        // Now initiate the transfer
+        await this.transferToHumanWithMusic();
         this.isProcessing = false;
         return;
       }

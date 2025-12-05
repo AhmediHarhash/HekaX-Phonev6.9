@@ -458,10 +458,10 @@ class AIReceptionist {
 
       // Simple direct dial to web client - this is what worked in v5
       await this.twilioClient.calls(this.callSid).update({
-        twiml: `<Response><Dial callerId="${callerId}"><Client>web-user</Client></Dial></Response>`,
+        twiml: `<Response><Dial callerId="${callerId}"><Client>ahmed-web</Client></Dial></Response>`,
       });
 
-      console.log("✅ Transfer initiated to web-user");
+      console.log("✅ Transfer initiated to ahmed-web");
     } catch (err) {
       console.error("❌ Transfer error:", err.message);
     }

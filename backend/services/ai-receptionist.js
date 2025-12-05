@@ -464,9 +464,18 @@ class AIReceptionist {
 
       console.log("📞 Dialing client:", clientIdentity);
 
-      // Simple direct dial to web client
+      // Transfer with custom ringback tone (caller hears music while ringing)
+      // ringTone="us" plays standard US ringback, or use a URL for custom music
       await this.twilioClient.calls(this.callSid).update({
-        twiml: `<Response><Dial callerId="${callerId}"><Client>${clientIdentity}</Client></Dial></Response>`,
+        twiml: `<Response>
+          <Dial callerId="${callerId}" timeout="30" ringTone="http://com.twilio.sounds.music.s3.amazonaws.com/MARKOVICHAMP-B8.mp3" action="${process.env.PUBLIC_BASE_URL}/twilio/transfer/status">
+            <Client>
+              <Identity>${clientIdentity}</Identity>
+            </Client>
+          </Dial>
+          <Say voice="Polly.Amy">We're sorry, no one is available right now. Please leave a message after the beep.</Say>
+          <Record maxLength="120" transcribe="true" recordingStatusCallback="${process.env.PUBLIC_BASE_URL}/twilio/recording/callback"/>
+        </Response>`,
       });
 
       console.log("✅ Transfer initiated to", clientIdentity);

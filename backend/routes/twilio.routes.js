@@ -11,6 +11,7 @@ const {
   logTwilioWebhook,
 } = require("../middleware/twilio.middleware");
 const { webhookLimiter } = require("../middleware/security.middleware");
+const { spamFilter } = require("../services/spam-filter.service");
 
 const router = express.Router();
 
@@ -36,6 +37,16 @@ router.post(
     console.log("📞 Inbound call:", { from: callerNumber, to: calledNumber });
 
     try {
+      // Check for spam/robocall
+      const spamCheck = await spamFilter.checkNumber(callerNumber);
+      if (spamCheck.isSpam) {
+        console.log(`🚫 Spam call blocked: ${callerNumber} (${spamCheck.reason})`);
+        twiml.reject({ reason: "rejected" });
+        return res.type("text/xml").send(twiml.toString());
+      }
+      if (spamCheck.reason) {
+        console.log(`⚠️ Spam warning: ${callerNumber} (${spamCheck.reason}, confidence: ${spamCheck.confidence})`);
+      }
       // Look up which organization owns this phone number
       // First check PhoneNumber table
       let phoneRecord = await prisma.phoneNumber.findFirst({

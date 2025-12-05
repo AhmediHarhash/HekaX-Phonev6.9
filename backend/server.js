@@ -116,6 +116,9 @@ try {
 // ============================================================================
 
 // Health check (no auth required)
+// Service start time for uptime calculation
+const SERVICE_START_TIME = Date.now();
+
 app.get("/", (req, res) => {
   res.json({
     status: "running",
@@ -124,32 +127,105 @@ app.get("/", (req, res) => {
   });
 });
 
-app.get("/health", async (req, res) => {
-  const health = {
+// Simple health check for load balancers (fast, no DB)
+app.get("/health", (req, res) => {
+  res.json({
     status: "healthy",
     timestamp: new Date().toISOString(),
     version: "2.1.0",
-  };
-
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    health.database = "connected";
-  } catch (err) {
-    health.database = "error";
-    health.status = "degraded";
-  }
-
-  res.status(health.status === "healthy" ? 200 : 503).json(health);
+  });
 });
 
+// Readiness check - confirms all dependencies are ready
 app.get("/ready", async (req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
     res.json({ ready: true });
   } catch (err) {
-    res.status(503).json({ ready: false });
+    res.status(503).json({ ready: false, error: "Database not ready" });
   }
 });
+
+// Comprehensive status endpoint for enterprise monitoring
+app.get("/status", async (req, res) => {
+  const startTime = Date.now();
+  const status = {
+    service: "HEKAX Phone",
+    version: "2.1.0",
+    environment: process.env.NODE_ENV || "development",
+    timestamp: new Date().toISOString(),
+    uptime: {
+      seconds: Math.floor((Date.now() - SERVICE_START_TIME) / 1000),
+      human: formatUptime(Date.now() - SERVICE_START_TIME),
+    },
+    checks: {},
+    overall: "healthy",
+  };
+
+  // Database check
+  try {
+    const dbStart = Date.now();
+    await prisma.$queryRaw`SELECT 1`;
+    status.checks.database = {
+      status: "healthy",
+      latency: Date.now() - dbStart + "ms",
+    };
+  } catch (err) {
+    status.checks.database = { status: "unhealthy", error: err.message };
+    status.overall = "unhealthy";
+  }
+
+  // Twilio check
+  try {
+    status.checks.twilio = {
+      status: process.env.TWILIO_ACCOUNT_SID ? "configured" : "missing",
+      accountSid: process.env.TWILIO_ACCOUNT_SID ? "***" + process.env.TWILIO_ACCOUNT_SID.slice(-4) : null,
+    };
+  } catch (err) {
+    status.checks.twilio = { status: "error", error: err.message };
+  }
+
+  // OpenAI check
+  status.checks.openai = {
+    status: process.env.OPENAI_API_KEY ? "configured" : "missing",
+  };
+
+  // Deepgram check
+  status.checks.deepgram = {
+    status: process.env.DEEPGRAM_API_KEY ? "configured" : "missing",
+  };
+
+  // Stripe check
+  status.checks.stripe = {
+    status: process.env.STRIPE_SECRET_KEY ? "configured" : "missing",
+  };
+
+  // Memory usage
+  const memUsage = process.memoryUsage();
+  status.memory = {
+    heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024) + "MB",
+    heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024) + "MB",
+    rss: Math.round(memUsage.rss / 1024 / 1024) + "MB",
+  };
+
+  // Response time
+  status.responseTime = Date.now() - startTime + "ms";
+
+  res.status(status.overall === "healthy" ? 200 : 503).json(status);
+});
+
+// Helper function to format uptime
+function formatUptime(ms) {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (days > 0) return `${days}d ${hours % 24}h ${minutes % 60}m`;
+  if (hours > 0) return `${hours}h ${minutes % 60}m`;
+  if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+  return `${seconds}s`;
+}
 
 // Auth routes
 try {

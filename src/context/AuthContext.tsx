@@ -1,5 +1,6 @@
 // ============================================================================
 // HEKAX Phone - Auth Context
+// Enhanced with refresh token support
 // ============================================================================
 
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
@@ -32,7 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const checkAuth = async () => {
     const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
-    
+
     if (!token) {
       setIsLoading(false);
       return;
@@ -43,7 +44,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(response.user);
       setOrg(response.organization);
     } catch (error) {
-      // Token invalid or expired
       console.error('Auth check failed:', error);
       clearAuth();
     } finally {
@@ -53,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const clearAuth = () => {
     localStorage.removeItem(STORAGE_KEYS.TOKEN);
+    localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
     localStorage.removeItem(STORAGE_KEYS.USER);
     localStorage.removeItem(STORAGE_KEYS.ORG);
     setUser(null);
@@ -61,17 +62,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const response = await authApi.login(email, password);
-    
-    // Store auth data
-    localStorage.setItem(STORAGE_KEYS.TOKEN, response.token);
+
+    // Tokens are already stored by authApi.login
     localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(response.user));
     localStorage.setItem(STORAGE_KEYS.ORG, JSON.stringify(response.organization));
-    
+
     setUser(response.user);
     setOrg(response.organization);
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    try {
+      await authApi.logout();
+    } catch (e) {
+      // Ignore logout errors
+    }
     clearAuth();
   }, []);
 

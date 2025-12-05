@@ -12,7 +12,13 @@
     "db:migrate": "npx prisma migrate dev",
     "db:studio": "npx prisma studio"
   },
-  "keywords": ["twilio", "ai", "voice", "receptionist", "saas"],
+  "keywords": [
+    "twilio",
+    "ai",
+    "voice",
+    "receptionist",
+    "saas"
+  ],
   "author": "HEKAX",
   "license": "ISC",
   "type": "commonjs",
@@ -24,11 +30,17 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "express-rate-limit": "^8.2.1",
+    "helmet": "^8.1.0",
+    "ioredis": "^5.8.2",
+    "joi": "^18.0.2",
     "jsonwebtoken": "^9.0.2",
     "openai": "^4.77.0",
     "prisma": "^5.22.0",
+    "rate-limit-redis": "^4.3.1",
     "stripe": "^14.10.0",
     "twilio": "^5.10.6",
+    "validator": "^13.15.23",
     "ws": "^8.18.0"
   },
   "devDependencies": {

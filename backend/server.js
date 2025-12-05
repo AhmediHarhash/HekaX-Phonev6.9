@@ -1,18 +1,35 @@
 // ============================================================================
 // HEKAX Phone - Main Server
-// Version: 2.0.0 (Refactored)
+// Version: 2.1.0 (Security Enhanced)
 // ============================================================================
 
 require("dotenv").config();
 
+// ============================================================================
+// SECURITY: Validate environment before anything else
+// ============================================================================
+
+const {
+  validateSecurityEnvironment,
+  securityHeaders,
+  corsOptions,
+  sanitizeRequest,
+  securityLogger,
+  detectSuspiciousActivity,
+  apiLimiter,
+} = require("./middleware/security.middleware");
+
+// This will exit if critical secrets are missing
+validateSecurityEnvironment();
+
 // Global error handlers
-process.on('uncaughtException', (err) => {
-  console.error('❌ UNCAUGHT EXCEPTION:', err);
+process.on("uncaughtException", (err) => {
+  console.error("❌ UNCAUGHT EXCEPTION:", err);
   process.exit(1);
 });
 
-process.on('unhandledRejection', (err) => {
-  console.error('❌ UNHANDLED REJECTION:', err);
+process.on("unhandledRejection", (err) => {
+  console.error("❌ UNHANDLED REJECTION:", err);
   process.exit(1);
 });
 
@@ -21,29 +38,35 @@ const cors = require("cors");
 const http = require("http");
 const WebSocket = require("ws");
 const twilio = require("twilio");
+const url = require("url");
 
 // Initialize Express
 const app = express();
 const server = http.createServer(app);
 
 // Initialize WebSocket for media streams
-const wss = new WebSocket.Server({ server, path: "/media-stream" });
+const wss = new WebSocket.Server({ noServer: true });
 
 // ============================================================================
-// MIDDLEWARE
+// MIDDLEWARE - ORDER MATTERS
 // ============================================================================
 
-app.use(cors({
-  origin: [
-    'https://phone.hekax.com',
-    'http://localhost:5173',
-    'http://localhost:3000',
-  ],
-  credentials: true,
-}));
+// 1. Security headers (Helmet)
+app.use(securityHeaders);
 
-// Stripe webhook route MUST be mounted before express.json() middleware
-// because it needs access to the raw request body for signature verification
+// 2. CORS with strict origin checking
+app.use(cors(corsOptions));
+
+// 3. Security logging
+app.use(securityLogger);
+
+// 4. Suspicious activity detection
+app.use(detectSuspiciousActivity);
+
+// 5. Trust proxy (for rate limiting behind reverse proxy)
+app.set("trust proxy", 1);
+
+// 6. Stripe webhook route MUST be mounted before body parsing
 try {
   const webhookRoutes = require("./routes/webhook.routes");
   app.use("/webhooks/stripe", webhookRoutes);
@@ -52,8 +75,15 @@ try {
   console.error("❌ Webhook routes error:", err);
 }
 
-app.use(express.urlencoded({ extended: false }));
-app.use(express.json());
+// 7. Body parsing
+app.use(express.urlencoded({ extended: false, limit: "10kb" }));
+app.use(express.json({ limit: "10kb" }));
+
+// 8. Request sanitization
+app.use(sanitizeRequest);
+
+// 9. General API rate limiting
+app.use("/api", apiLimiter);
 
 // ============================================================================
 // DATABASE
@@ -85,13 +115,12 @@ try {
 // ROUTES
 // ============================================================================
 
-// Health check
+// Health check (no auth required)
 app.get("/", (req, res) => {
-  res.json({ 
-    status: "running", 
-    service: "HEKAX Phone", 
-    version: "2.0.0",
-    environment: process.env.NODE_ENV || "development",
+  res.json({
+    status: "running",
+    service: "HEKAX Phone",
+    version: "2.1.0",
   });
 });
 
@@ -99,47 +128,26 @@ app.get("/health", async (req, res) => {
   const health = {
     status: "healthy",
     timestamp: new Date().toISOString(),
-    version: "2.0.0",
-    checks: {},
+    version: "2.1.0",
   };
 
-  // Check database
   try {
     await prisma.$queryRaw`SELECT 1`;
-    health.checks.database = { status: "ok" };
+    health.database = "connected";
   } catch (err) {
-    health.checks.database = { status: "error", message: err.message };
+    health.database = "error";
     health.status = "degraded";
-  }
-
-  // Check environment variables
-  const requiredEnvVars = [
-    "DATABASE_URL",
-    "JWT_SECRET",
-    "TWILIO_ACCOUNT_SID",
-    "OPENAI_API_KEY",
-  ];
-  
-  const missingVars = requiredEnvVars.filter(v => !process.env[v]);
-  if (missingVars.length > 0) {
-    health.checks.environment = { 
-      status: "warning", 
-      missing: missingVars.length,
-    };
-  } else {
-    health.checks.environment = { status: "ok" };
   }
 
   res.status(health.status === "healthy" ? 200 : 503).json(health);
 });
 
-// Readiness check (for k8s/docker)
 app.get("/ready", async (req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
     res.json({ ready: true });
   } catch (err) {
-    res.status(503).json({ ready: false, error: err.message });
+    res.status(503).json({ ready: false });
   }
 });
 
@@ -164,7 +172,7 @@ try {
   const auditLogsRoutes = require("./routes/audit-logs.routes");
   const billingRoutes = require("./routes/billing.routes");
   const plansRoutes = require("./routes/plans.routes");
-  
+
   app.use("/api/calls", callsRoutes);
   app.use("/api/leads", leadsRoutes);
   app.use("/api/team", teamRoutes);
@@ -175,30 +183,30 @@ try {
   app.use("/api/audit-logs", auditLogsRoutes);
   app.use("/api/billing", billingRoutes);
   app.use("/api/plans", plansRoutes);
-  
-  // Phase 6.3: Multi-org routes
+
+  // Multi-org routes
   const userOrganizationsRoutes = require("./routes/user-organizations.routes");
   app.use("/api/user/organizations", userOrganizationsRoutes);
-  
-  // Phase 6.4: BYO Keys & API Keys (Enterprise)
+
+  // Enterprise routes
   const byoKeysRoutes = require("./routes/byo-keys.routes");
   const { router: apiKeysRoutes } = require("./routes/api-keys.routes");
   app.use("/api/byo-keys", byoKeysRoutes);
   app.use("/api/api-keys", apiKeysRoutes);
-  
-  // Phase 6.5: Data Management (Retention, Cleanup, Export)
+
+  // Data Management
   const dataRoutes = require("./routes/data.routes");
   app.use("/api/data", dataRoutes);
-  
-  // Voice preview routes
+
+  // Voice preview
   const voiceRoutes = require("./routes/voice.routes");
   app.use("/api/voice", voiceRoutes);
 
-  // Twilio provisioning routes (auto-setup for organizations)
+  // Twilio provisioning
   const provisioningRoutes = require("./routes/provisioning.routes");
   app.use("/api/provisioning", provisioningRoutes);
 
-  console.log("✅ API routes loaded (including Twilio auto-provisioning)");
+  console.log("✅ API routes loaded");
 } catch (err) {
   console.error("❌ API routes error:", err);
 }
@@ -212,8 +220,6 @@ try {
   console.error("❌ Twilio routes error:", err);
 }
 
-// Note: Stripe webhook routes are mounted earlier (before body parsing middleware)
-
 // ============================================================================
 // TWILIO TOKEN ENDPOINT
 // ============================================================================
@@ -222,30 +228,46 @@ const AccessToken = twilio.jwt.AccessToken;
 const VoiceGrant = AccessToken.VoiceGrant;
 const { authMiddleware } = require("./middleware/auth.middleware");
 
-// Token endpoint now requires auth and uses org's subaccount
 app.get("/token", authMiddleware, async (req, res) => {
   try {
     const twilioService = require("./services/twilio.service");
     const identity = `${req.user.id}-${Date.now()}`;
-    
-    const result = await twilioService.generateAccessToken(req.organizationId, identity);
+
+    const result = await twilioService.generateAccessToken(
+      req.organizationId,
+      identity
+    );
     res.json(result);
   } catch (err) {
     console.error("❌ Token generation error:", err);
-    
-    // Fallback to master account if subaccount fails
-    const { TWILIO_ACCOUNT_SID, TWILIO_API_KEY, TWILIO_API_SECRET, TWIML_APP_SID } = process.env;
 
-    if (!TWILIO_ACCOUNT_SID || !TWILIO_API_KEY || !TWILIO_API_SECRET || !TWIML_APP_SID) {
+    const {
+      TWILIO_ACCOUNT_SID,
+      TWILIO_API_KEY,
+      TWILIO_API_SECRET,
+      TWIML_APP_SID,
+    } = process.env;
+
+    if (
+      !TWILIO_ACCOUNT_SID ||
+      !TWILIO_API_KEY ||
+      !TWILIO_API_SECRET ||
+      !TWIML_APP_SID
+    ) {
       return res.status(500).json({ error: "Missing Twilio config" });
     }
 
     const identity = req.query.identity || "web-user";
-    
-    const token = new AccessToken(TWILIO_ACCOUNT_SID, TWILIO_API_KEY, TWILIO_API_SECRET, {
-      identity,
-      ttl: 3600,
-    });
+
+    const token = new AccessToken(
+      TWILIO_ACCOUNT_SID,
+      TWILIO_API_KEY,
+      TWILIO_API_SECRET,
+      {
+        identity,
+        ttl: 3600,
+      }
+    );
 
     token.addGrant(
       new VoiceGrant({
@@ -259,9 +281,49 @@ app.get("/token", authMiddleware, async (req, res) => {
 });
 
 // ============================================================================
-// WEBSOCKET FOR AI MEDIA STREAMS
+// WEBSOCKET AUTHENTICATION & HANDLING
 // ============================================================================
 
+const { verifyAccessToken } = require("./middleware/auth.middleware");
+
+// Handle WebSocket upgrade with authentication
+server.on("upgrade", async (request, socket, head) => {
+  const pathname = url.parse(request.url).pathname;
+
+  if (pathname === "/media-stream") {
+    // For Twilio media streams, we validate via Twilio's parameters
+    // The stream comes from Twilio, not directly from users
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit("connection", ws, request);
+    });
+  } else {
+    // For other WebSocket connections, require auth token
+    const params = new URLSearchParams(url.parse(request.url).query);
+    const token = params.get("token");
+
+    if (!token) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+
+    const decoded = verifyAccessToken(token);
+    if (!decoded) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+
+    request.userId = decoded.userId;
+    request.organizationId = decoded.organizationId;
+
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit("connection", ws, request);
+    });
+  }
+});
+
+// WebSocket connection handler
 wss.on("connection", (ws, req) => {
   console.log("🎙️ New Media Stream WebSocket connected");
 
@@ -348,28 +410,59 @@ wss.on("connection", (ws, req) => {
 });
 
 // ============================================================================
+// ERROR HANDLING
+// ============================================================================
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: "Not found" });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error("❌ Server error:", err);
+
+  // Don't expose internal errors in production
+  const message =
+    process.env.NODE_ENV === "production"
+      ? "Internal server error"
+      : err.message;
+
+  res.status(err.status || 500).json({ error: message });
+});
+
+// ============================================================================
 // START SERVER
 // ============================================================================
 
 const PORT = process.env.PORT || 3000;
-const HOST = '0.0.0.0';
+const HOST = "0.0.0.0";
 
 async function startServer() {
   try {
-    // Test database connection
     await prisma.$connect();
     console.log("✅ Database connected");
-    
+
     server.listen(PORT, HOST, () => {
       console.log(`
 ╔═══════════════════════════════════════════════════════════╗
-║           HEKAX Phone Backend v2.0.0                      ║
-║           Refactored & Production Ready                   ║
+║           HEKAX Phone Backend v2.1.0                      ║
+║           Security Enhanced Edition                       ║
 ╠═══════════════════════════════════════════════════════════╣
 ║  Server:     http://${HOST}:${PORT}                             ║
 ║  AI:         ${AIReceptionist ? "✅ ENABLED" : "❌ DISABLED"}                               ║
 ║  Database:   ✅ CONNECTED                                 ║
 ║  WebSocket:  ✅ READY                                     ║
+║  Security:   ✅ ENABLED                                   ║
+╠═══════════════════════════════════════════════════════════╣
+║  Security Features:                                       ║
+║  • Rate limiting (auth, API, webhooks)                    ║
+║  • JWT with refresh tokens (1h/7d)                        ║
+║  • Helmet security headers                                ║
+║  • Twilio webhook signature validation                    ║
+║  • Account lockout (5 attempts, 15 min)                   ║
+║  • Input validation & sanitization                        ║
+║  • Strict CORS policy                                     ║
 ╚═══════════════════════════════════════════════════════════╝
       `);
     });

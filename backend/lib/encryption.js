@@ -6,8 +6,13 @@
 const crypto = require("crypto");
 
 // Encryption key should be 32 bytes for AES-256
-// IMPORTANT: Set this in environment variables in production!
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "hekax-default-key-change-in-prod!";
+// CRITICAL: This MUST be set in environment variables
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
+
+if (!ENCRYPTION_KEY) {
+  console.error("❌ CRITICAL: ENCRYPTION_KEY environment variable is not set");
+  process.exit(1);
+}
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;

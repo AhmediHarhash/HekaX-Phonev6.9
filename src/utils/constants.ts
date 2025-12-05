@@ -8,6 +8,7 @@ export const API_BASE = import.meta.env.VITE_API_URL || "https://phoneapi.hekax.
 // Local Storage Keys
 export const STORAGE_KEYS = {
   TOKEN: "hekax_token",
+  REFRESH_TOKEN: "hekax_refresh_token",
   USER: "hekax_user",
   ORG: "hekax_org",
   THEME: "hekax_theme",

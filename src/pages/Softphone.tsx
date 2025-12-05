@@ -15,6 +15,9 @@ import {
   Delete,
   AlertCircle,
   CreditCard,
+  Volume2,
+  VolumeX,
+  Volume1,
 } from 'lucide-react';
 import { PageHeader } from '../components/layout';
 import { Card, Button } from '../components/common';
@@ -45,13 +48,17 @@ export function SoftphonePage() {
     callDuration,
     activeCall,
     incomingCall,
+    volume,
     makeCall,
     hangup,
     toggleMute,
     acceptIncoming,
     rejectIncoming,
     sendDigits,
+    setVolume,
   } = useTwilio({ enabled: twilioEnabled });
+
+  const [showVolumeSlider, setShowVolumeSlider] = useState(false);
 
   const [phoneNumber, setPhoneNumber] = useState('');
 
@@ -201,7 +208,7 @@ export function SoftphonePage() {
             </div>
 
             {/* Call Controls */}
-            <div className="flex justify-center gap-4 mb-8">
+            <div className="flex justify-center gap-4 mb-6">
               <button
                 onClick={toggleMute}
                 className={`
@@ -216,12 +223,60 @@ export function SoftphonePage() {
                 {isMuted ? <MicOff size={24} /> : <Mic size={24} />}
               </button>
               <button
+                onClick={() => setShowVolumeSlider(!showVolumeSlider)}
+                className={`
+                  w-16 h-16 rounded-full flex items-center justify-center
+                  transition-colors
+                  ${showVolumeSlider
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  }
+                `}
+              >
+                {volume === 0 ? <VolumeX size={24} /> : volume < 50 ? <Volume1 size={24} /> : <Volume2 size={24} />}
+              </button>
+              <button
                 onClick={hangup}
                 className="w-16 h-16 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center"
               >
                 <PhoneOff size={24} />
               </button>
             </div>
+
+            {/* Volume Slider */}
+            {showVolumeSlider && (
+              <div className="mb-6 px-4">
+                <div className="flex items-center gap-3">
+                  <VolumeX size={18} className="text-slate-400" />
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={volume}
+                    onChange={(e) => setVolume(Number(e.target.value))}
+                    className="
+                      flex-1 h-2 rounded-full appearance-none cursor-pointer
+                      bg-slate-700
+                      [&::-webkit-slider-thumb]:appearance-none
+                      [&::-webkit-slider-thumb]:w-4
+                      [&::-webkit-slider-thumb]:h-4
+                      [&::-webkit-slider-thumb]:rounded-full
+                      [&::-webkit-slider-thumb]:bg-blue-500
+                      [&::-webkit-slider-thumb]:hover:bg-blue-400
+                      [&::-webkit-slider-thumb]:cursor-pointer
+                      [&::-moz-range-thumb]:w-4
+                      [&::-moz-range-thumb]:h-4
+                      [&::-moz-range-thumb]:rounded-full
+                      [&::-moz-range-thumb]:bg-blue-500
+                      [&::-moz-range-thumb]:border-0
+                      [&::-moz-range-thumb]:cursor-pointer
+                    "
+                  />
+                  <Volume2 size={18} className="text-slate-400" />
+                </div>
+                <p className="text-center text-sm text-slate-500 mt-2">Volume: {volume}%</p>
+              </div>
+            )}
 
             {/* DTMF Dial Pad */}
             <div className="grid grid-cols-3 gap-3">

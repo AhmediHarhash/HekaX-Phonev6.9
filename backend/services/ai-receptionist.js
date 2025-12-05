@@ -1,6 +1,6 @@
 // ============================================================================
 // HEKAX Phone - AI Receptionist Service
-// Phase 6.6: OpenAI STT + TTS Stack (Cost Optimized)
+// Enterprise-Grade Voice AI with Natural Conversation Flow
 // ============================================================================
 
 require("dotenv").config();
@@ -15,7 +15,7 @@ const os = require("os");
 // VOICE OPTIONS (OpenAI TTS)
 // ============================================================================
 const VOICE_OPTIONS = {
-  nova: { name: "Nova", description: "Calm & professional" },      // DEFAULT
+  nova: { name: "Nova", description: "Calm & professional" },
   sage: { name: "Sage", description: "Warm & wise" },
   alloy: { name: "Alloy", description: "Neutral & balanced" },
   echo: { name: "Echo", description: "Friendly & warm" },
@@ -24,6 +24,11 @@ const VOICE_OPTIONS = {
 };
 
 const DEFAULT_VOICE = "nova";
+
+// ============================================================================
+// HOLD MUSIC URL (royalty-free)
+// ============================================================================
+const HOLD_MUSIC_URL = "http://com.twilio.sounds.music.s3.amazonaws.com/MARKOVICHAMP-B8.mp3";
 
 class AIReceptionist {
   constructor({
@@ -43,40 +48,55 @@ class AIReceptionist {
     this.fromNumber = fromNumber;
     this.toNumber = toNumber;
     this.organization = organization || null;
-    this.orgName = organization?.name || "HEKAX";
-    this.greeting = organization?.greeting || "Thank you for calling. May I have your name please?";
+    this.orgName = organization?.name || "our company";
+    this.greeting = organization?.greeting || `Thank you for calling ${this.orgName}. How may I help you today?`;
     this.customParameters = customParameters || {};
 
-    // Voice selection - use org's voice or default to nova
+    // Voice selection
     this.voiceId = organization?.voiceId || DEFAULT_VOICE;
-    // Validate voice exists
     if (!VOICE_OPTIONS[this.voiceId]) {
       this.voiceId = DEFAULT_VOICE;
     }
 
-    // State
+    // =========================================================================
+    // STATE MANAGEMENT
+    // =========================================================================
     this.cleanedUp = false;
     this.transferredToHuman = false;
     this.turnCount = 0;
-    this.maxTurns = 20;
+    this.maxTurns = 25;
     this.isProcessing = false;
     this.isSpeaking = false;
     this.wantsHumanTransfer = false;
+    this.callStartTime = Date.now();
 
-    // Audio buffer for STT
+    // =========================================================================
+    // AUDIO BUFFERING - Enterprise Settings
+    // =========================================================================
     this.audioBuffer = [];
     this.silenceTimer = null;
     this.lastAudioTime = Date.now();
-    this.lastSpeechTime = Date.now(); // When we last detected actual speech
-    this.SILENCE_THRESHOLD_MS = 1500; // 1.5 seconds of silence = end of speech
-    this.MIN_AUDIO_LENGTH = 3200; // Minimum ~0.2 seconds of audio to process
-    this.SPEECH_THRESHOLD = 20; // Audio level threshold to detect speech (0-128 for mulaw)
+    this.lastSpeechTime = Date.now();
+    this.speechStartTime = null; // When caller started current utterance
+    this.hasSpeechInBuffer = false; // Whether buffer contains any speech
 
-    // Conversation history
+    // Tuned thresholds for natural conversation
+    this.SILENCE_THRESHOLD_MS = 1200; // 1.2 seconds - wait for caller to finish
+    this.MIN_SPEECH_DURATION_MS = 300; // Minimum speech duration to process
+    this.MIN_AUDIO_LENGTH = 1600; // Minimum ~0.1 seconds of audio
+    this.SPEECH_THRESHOLD = 15; // Audio level threshold (lowered for sensitivity)
+    this.SPEECH_CONFIRM_CHUNKS = 3; // Need 3 consecutive chunks above threshold
+
+    // Speech detection state
+    this.consecutiveSpeechChunks = 0;
+    this.consecutiveSilenceChunks = 0;
+    this.SILENCE_CONFIRM_CHUNKS = 15; // ~300ms of silence to confirm end of speech
+
+    // =========================================================================
+    // CONVERSATION TRACKING
+    // =========================================================================
     this.conversationHistory = [];
     this.transcript = [];
-
-    // Caller information extracted from conversation
     this.callerInfo = {
       name: null,
       email: null,
@@ -92,7 +112,9 @@ class AIReceptionist {
       wantsHumanAgent: false,
     };
 
-    // Services - OpenAI only now
+    // =========================================================================
+    // API CLIENTS
+    // =========================================================================
     this.openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     this.twilioClient = twilio(
       process.env.TWILIO_ACCOUNT_SID,
@@ -100,121 +122,146 @@ class AIReceptionist {
     );
   }
 
+  // ===========================================================================
+  // INITIALIZATION
+  // ===========================================================================
   async initialize() {
     console.log("🤖 Initializing AI Receptionist for:", this.orgName);
-    console.log("🎤 Using OpenAI STT + TTS (voice:", this.voiceId, ")");
+    console.log("🎤 Voice:", this.voiceId, "| Silence threshold:", this.SILENCE_THRESHOLD_MS, "ms");
 
     try {
-      // Start silence detection loop
       this.startSilenceDetection();
 
-      // Delay greeting slightly for better audio quality
+      // Small delay for audio stream to stabilize, then greet
       setTimeout(async () => {
         await this.speak(this.greeting);
-      }, 2000);
+      }, 1500);
     } catch (error) {
-      console.error("❌ Failed to initialize:", error.message);
+      console.error("❌ Initialization error:", error.message);
       await this.speak("Thank you for calling. Please hold.");
     }
   }
 
   // ===========================================================================
-  // OPENAI STT - Collect audio and transcribe on silence
+  // SMART SILENCE DETECTION
+  // Waits for caller to completely finish speaking
   // ===========================================================================
-
   startSilenceDetection() {
-    // Check every 500ms if we have audio to process
     this.silenceTimer = setInterval(async () => {
       const timeSinceLastSpeech = Date.now() - this.lastSpeechTime;
+      const hasSufficientAudio = this.audioBuffer.length > 0 && this.hasSpeechInBuffer;
+      const speechDuration = this.speechStartTime ? (this.lastSpeechTime - this.speechStartTime) : 0;
 
-      // Debug log every 5 seconds
-      if (Date.now() % 5000 < 500) {
-        console.log(`🔍 Status: buffer=${this.audioBuffer.length}, speechSilence=${Math.round(timeSinceLastSpeech/1000)}s, processing=${this.isProcessing}, speaking=${this.isSpeaking}`);
+      // Debug log every 3 seconds
+      if (Date.now() % 3000 < 500) {
+        console.log(`🔍 buffer=${this.audioBuffer.length}, silence=${Math.round(timeSinceLastSpeech/1000)}s, hasSpeech=${this.hasSpeechInBuffer}, speaking=${this.isSpeaking}`);
       }
 
-      // If we have audio buffered and enough SPEECH silence has passed
-      // (meaning caller stopped talking, even if background noise continues)
+      // Process when:
+      // 1. We have audio with speech in it
+      // 2. Enough silence has passed (caller stopped talking)
+      // 3. Not already processing or speaking
+      // 4. Speech was long enough to be meaningful
       if (
-        this.audioBuffer.length > 0 &&
+        hasSufficientAudio &&
         timeSinceLastSpeech > this.SILENCE_THRESHOLD_MS &&
         !this.isProcessing &&
-        !this.isSpeaking
+        !this.isSpeaking &&
+        speechDuration > this.MIN_SPEECH_DURATION_MS
       ) {
-        console.log(`🎯 Speech silence detected (${Math.round(timeSinceLastSpeech/1000)}s), processing audio...`);
+        console.log(`🎯 Caller finished speaking (${Math.round(speechDuration/1000)}s speech, ${Math.round(timeSinceLastSpeech/1000)}s silence)`);
         await this.processBufferedAudio();
       }
-    }, 500);
+    }, 200); // Check more frequently for responsiveness
   }
 
+  // ===========================================================================
+  // AUDIO HANDLING WITH SPEECH DETECTION
+  // ===========================================================================
   async handleAudio(payload) {
     if (this.transferredToHuman) return;
-    if (this.isSpeaking) return; // Don't record while AI is speaking
+    if (this.isSpeaking) return;
 
-    // Buffer the audio
     const audioData = Buffer.from(payload, "base64");
     this.audioBuffer.push(audioData);
     this.lastAudioTime = Date.now();
 
-    // Detect if this chunk contains actual speech (not just silence/noise)
+    // Detect speech level
     const audioLevel = this.getAudioLevel(audioData);
-    if (audioLevel > this.SPEECH_THRESHOLD) {
-      this.lastSpeechTime = Date.now();
+    const isSpeech = audioLevel > this.SPEECH_THRESHOLD;
+
+    if (isSpeech) {
+      this.consecutiveSpeechChunks++;
+      this.consecutiveSilenceChunks = 0;
+
+      // Confirm speech after consecutive chunks (debounce)
+      if (this.consecutiveSpeechChunks >= this.SPEECH_CONFIRM_CHUNKS) {
+        if (!this.speechStartTime) {
+          this.speechStartTime = Date.now();
+          console.log("🗣️ Caller started speaking...");
+        }
+        this.lastSpeechTime = Date.now();
+        this.hasSpeechInBuffer = true;
+      }
+    } else {
+      this.consecutiveSilenceChunks++;
+      this.consecutiveSpeechChunks = 0;
     }
 
-    // Log occasionally to confirm audio is being received
-    if (this.audioBuffer.length % 100 === 0) {
-      console.log(`🎤 Audio buffered: ${this.audioBuffer.length} chunks (${Math.round(this.audioBuffer.length * 20 / 1000)}s), level=${audioLevel}`);
+    // Log occasionally
+    if (this.audioBuffer.length % 150 === 0) {
+      console.log(`🎤 Buffered: ${this.audioBuffer.length} chunks, level=${audioLevel}, speech=${this.hasSpeechInBuffer}`);
     }
   }
 
-  // Calculate audio level from mulaw data (0-128 scale)
   getAudioLevel(audioData) {
     let sum = 0;
     for (let i = 0; i < audioData.length; i++) {
-      // Mulaw: 0xFF is silence, deviation from 0xFF indicates sound
-      const deviation = Math.abs(audioData[i] - 0xFF);
+      // Mulaw: center is around 0x7F/0xFF, deviation = sound
+      const sample = audioData[i];
+      const deviation = Math.abs(sample - 0x7F);
       sum += deviation;
     }
     return Math.round(sum / audioData.length);
   }
 
+  // ===========================================================================
+  // AUDIO PROCESSING
+  // ===========================================================================
   async processBufferedAudio() {
     if (this.audioBuffer.length === 0) return;
     if (this.isProcessing) return;
 
-    // Combine all audio chunks
     const combinedAudio = Buffer.concat(this.audioBuffer);
-    const audioLength = this.audioBuffer.length;
-    this.audioBuffer = []; // Clear buffer
+    const chunkCount = this.audioBuffer.length;
 
-    console.log(`🎤 Processing ${audioLength} audio chunks (${combinedAudio.length} bytes)`);
+    // Reset buffer state
+    this.audioBuffer = [];
+    this.hasSpeechInBuffer = false;
+    this.speechStartTime = null;
+    this.consecutiveSpeechChunks = 0;
+    this.consecutiveSilenceChunks = 0;
 
-    // Skip if too short (likely just noise)
     if (combinedAudio.length < this.MIN_AUDIO_LENGTH) {
       console.log("⚠️ Audio too short, skipping");
       return;
     }
 
     this.isProcessing = true;
+    console.log(`🎤 Processing ${chunkCount} chunks (${combinedAudio.length} bytes)`);
 
     try {
-      // Convert mulaw 8kHz to WAV for OpenAI
       const wavBuffer = this.mulawToWav(combinedAudio);
-      console.log(`🔄 Converted to WAV: ${wavBuffer.length} bytes`);
-
-      // Write to temp file (OpenAI SDK needs a file)
-      const tempFile = path.join(os.tmpdir(), `hekax-audio-${Date.now()}.wav`);
+      const tempFile = path.join(os.tmpdir(), `hekax-${Date.now()}.wav`);
       fs.writeFileSync(tempFile, wavBuffer);
 
-      // Transcribe with OpenAI Whisper
-      console.log("🎯 Sending to Whisper for transcription...");
+      console.log("🎯 Transcribing with Whisper...");
       const transcript = await this.transcribeAudio(tempFile);
 
-      // Clean up temp file
       try { fs.unlinkSync(tempFile); } catch (e) {}
 
-      if (transcript && transcript.trim().length > 0) {
-        console.log("🎤 Caller said:", transcript);
+      if (transcript && transcript.trim().length > 1) {
+        console.log("🎤 Caller:", transcript);
         this.transcript.push({
           role: "user",
           content: transcript,
@@ -222,11 +269,10 @@ class AIReceptionist {
         });
         await this.processUserInput(transcript);
       } else {
-        console.log("⚠️ Whisper returned empty transcript");
+        console.log("⚠️ Empty transcript, might be noise");
       }
     } catch (error) {
-      console.error("❌ Audio processing error:", error.message);
-      console.error(error.stack);
+      console.error("❌ Processing error:", error.message);
     } finally {
       this.isProcessing = false;
     }
@@ -240,101 +286,44 @@ class AIReceptionist {
         language: "en",
         response_format: "text",
       });
-
       return response;
     } catch (error) {
-      console.error("❌ Transcription error:", error.message);
+      console.error("❌ Whisper error:", error.message);
       return null;
     }
   }
 
-  // Convert mulaw 8kHz to WAV format
-  mulawToWav(mulawBuffer) {
-    const sampleRate = 8000;
-    const numChannels = 1;
-    const bitsPerSample = 16;
-
-    // Decode mulaw to PCM
-    const pcmSamples = new Int16Array(mulawBuffer.length);
-    for (let i = 0; i < mulawBuffer.length; i++) {
-      pcmSamples[i] = this.mulawDecode(mulawBuffer[i]);
-    }
-
-    // Create WAV header
-    const wavHeader = Buffer.alloc(44);
-    const dataSize = pcmSamples.length * 2;
-    const fileSize = dataSize + 36;
-
-    // RIFF header
-    wavHeader.write("RIFF", 0);
-    wavHeader.writeUInt32LE(fileSize, 4);
-    wavHeader.write("WAVE", 8);
-
-    // fmt chunk
-    wavHeader.write("fmt ", 12);
-    wavHeader.writeUInt32LE(16, 16); // chunk size
-    wavHeader.writeUInt16LE(1, 20); // PCM format
-    wavHeader.writeUInt16LE(numChannels, 22);
-    wavHeader.writeUInt32LE(sampleRate, 24);
-    wavHeader.writeUInt32LE(sampleRate * numChannels * bitsPerSample / 8, 28);
-    wavHeader.writeUInt16LE(numChannels * bitsPerSample / 8, 32);
-    wavHeader.writeUInt16LE(bitsPerSample, 34);
-
-    // data chunk
-    wavHeader.write("data", 36);
-    wavHeader.writeUInt32LE(dataSize, 40);
-
-    // Combine header and PCM data
-    const pcmBuffer = Buffer.from(pcmSamples.buffer);
-    return Buffer.concat([wavHeader, pcmBuffer]);
-  }
-
-  // Mulaw decode lookup table
-  mulawDecode(mulawByte) {
-    // Invert bits
-    mulawByte = ~mulawByte & 0xFF;
-    
-    const sign = (mulawByte & 0x80) ? -1 : 1;
-    const exponent = (mulawByte >> 4) & 0x07;
-    const mantissa = mulawByte & 0x0F;
-    
-    let sample = (mantissa << (exponent + 3)) + (1 << (exponent + 3)) - 132;
-    sample = sign * sample;
-    
-    return Math.max(-32768, Math.min(32767, sample));
-  }
-
+  // ===========================================================================
+  // CONVERSATION PROCESSING
+  // ===========================================================================
   async processUserInput(userText) {
     if (this.isProcessing && this.conversationHistory.length > 0) return;
     this.isProcessing = true;
     this.turnCount++;
 
     if (this.turnCount > this.maxTurns) {
-      await this.speak("Thank you for your time. I'll pass your details to the team.");
+      await this.speak("Thank you for your time. I'll make sure your information is passed to our team. Have a great day!");
       this.isProcessing = false;
       return;
     }
 
-    // Small delay for natural conversation flow
-    await new Promise(resolve => setTimeout(resolve, 500));
-
     try {
       this.conversationHistory.push({ role: "user", content: userText });
 
-      // Extract caller information
+      // Extract caller info
       await this.extractCallerInfo(userText);
 
-      // Check if human transfer requested
+      // Check for transfer request
       if ((this.callerInfo.wantsHumanAgent || this.wantsHumanTransfer) && !this.transferredToHuman) {
         this.transferredToHuman = true;
-        await this.speak("Of course, let me transfer you to one of our team members. Please hold.");
-        
+        await this.speak("Absolutely, let me connect you with a team member right away. Please hold for just a moment.");
+
         setTimeout(() => {
-          this.transferToHuman().catch(err => {
+          this.transferToHumanWithMusic().catch(err => {
             console.error("❌ Transfer failed:", err.message);
           });
-        }, 1200);
-        
+        }, 800);
+
         this.isProcessing = false;
         return;
       }
@@ -342,7 +331,7 @@ class AIReceptionist {
       // Generate AI response
       console.log("🧠 Generating response...");
       const response = await this.openai.chat.completions.create({
-        model: "gpt-4o-mini", // Using mini for cost efficiency
+        model: "gpt-4o-mini",
         messages: [
           { role: "system", content: this.getSystemPrompt() },
           ...this.conversationHistory,
@@ -364,7 +353,7 @@ class AIReceptionist {
       await this.speak(aiResponse);
     } catch (error) {
       console.error("❌ Process error:", error.message);
-      await this.speak("I'm sorry, could you repeat that?");
+      await this.speak("I apologize, could you please repeat that?");
     } finally {
       this.isProcessing = false;
     }
@@ -392,14 +381,13 @@ class AIReceptionist {
   "wantsHumanAgent": true or false
 }
 Rules:
-- "wantsHumanAgent": true if caller asks to speak to a human, real person, agent, or be transferred
-- Only extract information that is clearly stated`,
+- "wantsHumanAgent": true if caller asks for human, real person, agent, representative, someone, transfer, speak to someone
+- Only extract clearly stated information`,
           },
           {
             role: "user",
             content: `Current info: ${JSON.stringify(this.callerInfo)}
-Text: "${userText}"
-Extract any new information:`,
+Text: "${userText}"`,
           },
         ],
         max_tokens: 150,
@@ -407,8 +395,7 @@ Extract any new information:`,
       });
 
       const extracted = JSON.parse(response.choices[0].message.content);
-      
-      // Update caller info with extracted data
+
       for (const key of Object.keys(this.callerInfo)) {
         if (extracted[key] !== undefined && extracted[key] !== null && extracted[key] !== "") {
           this.callerInfo[key] = extracted[key];
@@ -419,110 +406,117 @@ Extract any new information:`,
         this.wantsHumanTransfer = true;
       }
 
-      console.log("📋 Caller info updated:", this.callerInfo.name || "Unknown");
+      if (this.callerInfo.name) {
+        console.log("📋 Caller identified:", this.callerInfo.name);
+      }
     } catch (error) {
-      console.error("⚠️ Info extraction error:", error.message);
+      console.error("⚠️ Extraction error:", error.message);
     }
   }
 
-  async transferToHuman() {
+  // ===========================================================================
+  // TRANSFER WITH HOLD MUSIC
+  // ===========================================================================
+  async transferToHumanWithMusic() {
     try {
-      console.log("🔁 Transferring to human agent...");
+      console.log("🔁 Transferring to human with hold music...");
       this.transferredToHuman = true;
 
       const callerId = this.toNumber || process.env.TWILIO_NUMBER;
 
+      // Use Play for hold music while connecting
       await this.twilioClient.calls(this.callSid).update({
         twiml: `
           <Response>
-            <Dial callerId="${callerId}">
-              <Client>ahmed-web</Client>
+            <Play loop="10">${HOLD_MUSIC_URL}</Play>
+            <Dial callerId="${callerId}" timeout="30" action="${process.env.PUBLIC_BASE_URL}/twilio/transfer/status">
+              <Client>web-user</Client>
             </Dial>
+            <Say voice="Polly.Amy">We're sorry, no one is available right now. Please leave a message after the beep.</Say>
+            <Record maxLength="120" transcribe="true" />
           </Response>
         `,
       });
+
+      console.log("✅ Transfer initiated with hold music");
     } catch (err) {
-      console.error("❌ Transfer failed:", err.message);
-      await this.speak("I'm sorry, something went wrong. Please call back.");
+      console.error("❌ Transfer error:", err.message);
+      await this.speak("I apologize, I'm having trouble connecting you. Please try calling back in a moment.");
     }
   }
 
+  // Legacy transfer without music
+  async transferToHuman() {
+    return this.transferToHumanWithMusic();
+  }
+
+  // ===========================================================================
+  // TEXT-TO-SPEECH
+  // ===========================================================================
   async speak(text) {
     try {
-      console.log("🔊 Speaking:", text.substring(0, 50) + "...");
+      console.log("🔊 Speaking:", text.substring(0, 60) + (text.length > 60 ? "..." : ""));
       this.isSpeaking = true;
 
-      // Safety timeout - never stay in speaking mode for more than 30 seconds
+      // Reset speech detection for fresh listening after AI speaks
+      this.lastSpeechTime = Date.now();
+      this.speechStartTime = null;
+      this.hasSpeechInBuffer = false;
+
       const safetyTimeout = setTimeout(() => {
         if (this.isSpeaking) {
-          console.log("⚠️ Speaking safety timeout triggered");
+          console.log("⚠️ Speaking timeout, resetting");
           this.isSpeaking = false;
         }
-      }, 30000);
+      }, 20000);
 
       const audioBuffer = await this.textToSpeech(text);
       if (audioBuffer) {
-        console.log(`🔊 Sending ${audioBuffer.length} bytes of audio to Twilio`);
         await this.sendAudioToTwilio(audioBuffer);
-      } else {
-        console.log("⚠️ No audio buffer generated from TTS");
       }
 
       clearTimeout(safetyTimeout);
     } catch (error) {
       console.error("❌ Speak error:", error);
     } finally {
-      // Add small delay before allowing audio capture again
+      // Brief pause before listening again
       setTimeout(() => {
         this.isSpeaking = false;
-        console.log("🎤 Ready to listen again");
-      }, 500);
+        this.lastSpeechTime = Date.now(); // Reset so we wait for new speech
+        console.log("🎤 Listening...");
+      }, 300);
     }
   }
 
-  // ===========================================================================
-  // OPENAI TTS
-  // ===========================================================================
   async textToSpeech(text) {
     try {
-      // Use OpenAI TTS
       const mp3Response = await this.openai.audio.speech.create({
-        model: "tts-1", // Use tts-1 for speed, tts-1-hd for quality
+        model: "tts-1",
         voice: this.voiceId,
         input: text,
-        response_format: "pcm", // Raw PCM for easier conversion
+        response_format: "pcm",
+        speed: 1.0,
       });
 
-      // Get the audio data
       const arrayBuffer = await mp3Response.arrayBuffer();
       const pcmBuffer = Buffer.from(arrayBuffer);
-
-      // Convert PCM (24kHz, 16-bit) to mulaw (8kHz) for Twilio
-      const mulawBuffer = this.pcmToMulaw(pcmBuffer);
-
-      return mulawBuffer;
+      return this.pcmToMulaw(pcmBuffer);
     } catch (error) {
-      console.error("❌ OpenAI TTS error:", error.message);
+      console.error("❌ TTS error:", error.message);
       return null;
     }
   }
 
-  // Convert PCM 24kHz 16-bit to mulaw 8kHz for Twilio
   pcmToMulaw(pcmBuffer) {
-    // OpenAI PCM is 24kHz, 16-bit mono
-    // Twilio expects 8kHz mulaw
-    // We need to: 1) Downsample 24kHz -> 8kHz (factor of 3), 2) Convert to mulaw
-
     const inputSamples = new Int16Array(
-      pcmBuffer.buffer, 
-      pcmBuffer.byteOffset, 
+      pcmBuffer.buffer,
+      pcmBuffer.byteOffset,
       Math.floor(pcmBuffer.length / 2)
     );
-    const outputLength = Math.floor(inputSamples.length / 3); // Downsample by 3
+    const outputLength = Math.floor(inputSamples.length / 3);
     const mulawOutput = Buffer.alloc(outputLength);
 
     for (let i = 0; i < outputLength; i++) {
-      // Simple downsampling: take every 3rd sample
       const sample = inputSamples[i * 3];
       mulawOutput[i] = this.linearToMulaw(sample);
     }
@@ -530,7 +524,6 @@ Extract any new information:`,
     return mulawOutput;
   }
 
-  // Linear PCM to mulaw encoding
   linearToMulaw(sample) {
     const MULAW_MAX = 0x1FFF;
     const MULAW_BIAS = 33;
@@ -550,111 +543,8 @@ Extract any new information:`,
     return mulawByte & 0xFF;
   }
 
-  // ===========================================================================
-  // DEPRECATED: ElevenLabs TTS (kept commented for future premium voice support)
-  // ===========================================================================
-  /*
-  async textToSpeechElevenLabs(text) {
-    try {
-      const voiceId = this.organization?.elevenlabsVoiceId || 
-        process.env.ELEVENLABS_VOICE_ID || 
-        "21m00Tcm4TlvDq8ikWAM";
-
-      const response = await fetch(
-        `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=ulaw_8000`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "xi-api-key": process.env.ELEVENLABS_API_KEY,
-          },
-          body: JSON.stringify({
-            text,
-            model_id: "eleven_turbo_v2_5",
-            voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-          }),
-        }
-      );
-
-      if (!response.ok) return null;
-      return Buffer.from(await response.arrayBuffer());
-    } catch (error) {
-      console.error("❌ ElevenLabs TTS error:", error);
-      return null;
-    }
-  }
-  */
-
-  // ===========================================================================
-  // DEPRECATED: Deepgram STT (kept commented for future BYO keys support)
-  // ===========================================================================
-  /*
-  async initializeDeepgram() {
-    console.log("🎤 Connecting to Deepgram...");
-
-    const apiKey = process.env.DEEPGRAM_API_KEY;
-    const url =
-      "wss://api.deepgram.com/v1/listen" +
-      "?model=nova-3" +
-      "&encoding=mulaw" +
-      "&sample_rate=8000" +
-      "&channels=1" +
-      "&interim_results=true" +
-      "&endpointing=600" +
-      "&utterance_end_ms=1200" +
-      "&vad_events=true" +
-      "&smart_format=true";
-
-    return new Promise((resolve, reject) => {
-      this.deepgramWs = new WebSocket(url, {
-        headers: { Authorization: `Token ${apiKey}` },
-      });
-
-      this.deepgramWs.on("open", () => {
-        console.log("✅ Deepgram connected");
-        resolve();
-      });
-
-      this.deepgramWs.on("message", async (data) => {
-        try {
-          const response = JSON.parse(data.toString());
-          const transcript = response.channel?.alternatives?.[0]?.transcript;
-          const isFinal = response.is_final || response.speech_final;
-
-          if (transcript && transcript.trim() && isFinal && !this.isProcessing) {
-            console.log("🎤 Caller said:", transcript);
-            this.transcript.push({
-              role: "user",
-              content: transcript,
-              timestamp: new Date().toISOString(),
-            });
-            await this.processUserInput(transcript);
-          }
-        } catch (e) {
-          // Ignore parse errors
-        }
-      });
-
-      this.deepgramWs.on("error", (err) => {
-        console.error("❌ Deepgram error:", err.message);
-        reject(err);
-      });
-
-      this.deepgramWs.on("close", (code) => {
-        console.log("📴 Deepgram closed:", code);
-      });
-
-      setTimeout(() => {
-        if (this.deepgramWs?.readyState !== WebSocket.OPEN) {
-          reject(new Error("Deepgram connection timeout"));
-        }
-      }, 5000);
-    });
-  }
-  */
-
   async sendAudioToTwilio(audioBuffer) {
-    const chunkSize = 160; // 20ms of 8kHz mulaw audio
+    const chunkSize = 160;
     for (let i = 0; i < audioBuffer.length; i += chunkSize) {
       const chunk = audioBuffer.slice(i, Math.min(i + chunkSize, audioBuffer.length));
       if (this.ws.readyState === WebSocket.OPEN) {
@@ -664,47 +554,101 @@ Extract any new information:`,
           media: { payload: chunk.toString("base64") },
         }));
       }
-      // Small delay to prevent buffer overflow
-      await new Promise(resolve => setTimeout(resolve, 15));
+      await new Promise(resolve => setTimeout(resolve, 18));
     }
   }
 
-  handleMark(mark) {
-    // Handle TTS completion marks if needed
+  // ===========================================================================
+  // MULAW TO WAV CONVERSION
+  // ===========================================================================
+  mulawToWav(mulawBuffer) {
+    const sampleRate = 8000;
+    const numChannels = 1;
+    const bitsPerSample = 16;
+
+    const pcmSamples = new Int16Array(mulawBuffer.length);
+    for (let i = 0; i < mulawBuffer.length; i++) {
+      pcmSamples[i] = this.mulawDecode(mulawBuffer[i]);
+    }
+
+    const wavHeader = Buffer.alloc(44);
+    const dataSize = pcmSamples.length * 2;
+    const fileSize = dataSize + 36;
+
+    wavHeader.write("RIFF", 0);
+    wavHeader.writeUInt32LE(fileSize, 4);
+    wavHeader.write("WAVE", 8);
+    wavHeader.write("fmt ", 12);
+    wavHeader.writeUInt32LE(16, 16);
+    wavHeader.writeUInt16LE(1, 20);
+    wavHeader.writeUInt16LE(numChannels, 22);
+    wavHeader.writeUInt32LE(sampleRate, 24);
+    wavHeader.writeUInt32LE(sampleRate * numChannels * bitsPerSample / 8, 28);
+    wavHeader.writeUInt16LE(numChannels * bitsPerSample / 8, 32);
+    wavHeader.writeUInt16LE(bitsPerSample, 34);
+    wavHeader.write("data", 36);
+    wavHeader.writeUInt32LE(dataSize, 40);
+
+    const pcmBuffer = Buffer.from(pcmSamples.buffer);
+    return Buffer.concat([wavHeader, pcmBuffer]);
   }
 
+  mulawDecode(mulawByte) {
+    mulawByte = ~mulawByte & 0xFF;
+    const sign = (mulawByte & 0x80) ? -1 : 1;
+    const exponent = (mulawByte >> 4) & 0x07;
+    const mantissa = mulawByte & 0x0F;
+    let sample = (mantissa << (exponent + 3)) + (1 << (exponent + 3)) - 132;
+    return Math.max(-32768, Math.min(32767, sign * sample));
+  }
+
+  handleMark(mark) {
+    // TTS mark handling
+  }
+
+  // ===========================================================================
+  // SYSTEM PROMPT
+  // ===========================================================================
   getSystemPrompt() {
-    return `You are the AI receptionist for ${this.orgName}.
+    return `You are the professional AI receptionist for ${this.orgName}.
 
-PERSONALITY:
-- Warm, professional, and efficient
+VOICE PERSONA:
+- Warm, confident, and genuinely helpful
 - Speak naturally like a skilled human receptionist
-- Keep responses to 1-2 sentences maximum
+- Use conversational language, not robotic phrases
+- Show empathy and understanding
 
-TASKS:
-1. Greet callers warmly
-2. Get their name if not provided
-3. Understand why they're calling
-4. Collect relevant details (appointment times, contact info)
-5. Offer to transfer to a human if requested
-6. End calls professionally
+RESPONSE RULES:
+- Keep responses to 1-2 SHORT sentences maximum
+- Never use more than 30 words per response
+- Ask ONE question at a time
+- Use the caller's name once you know it
+- Never use emojis, asterisks, or special characters
+- Never say "I'm an AI" - just be helpful
 
-CURRENT CALLER INFO:
+CONVERSATION FLOW:
+1. If you don't have their name, ask for it naturally
+2. Understand their reason for calling
+3. Gather relevant details (appointments, contact info)
+4. Offer to transfer to a human if they ask or seem frustrated
+5. End calls warmly
+
+CURRENT CALLER:
 - Phone: ${this.callerInfo.phone || "Unknown"}
 - Name: ${this.callerInfo.name || "Not yet provided"}
 - Company: ${this.callerInfo.company || "Not mentioned"}
-- Email: ${this.callerInfo.email || "Not provided"}
 - Reason: ${this.callerInfo.reason || "Not yet stated"}
+- Call Duration: ${Math.round((Date.now() - this.callStartTime) / 1000)}s
 
-RULES:
-- Never use emojis or markdown
-- Ask ONE question at a time
-- If caller wants a human, say you'll transfer them
-- If caller says goodbye, wish them well and end professionally`;
+TRANSFER TRIGGERS:
+If caller says any of: "speak to someone", "real person", "human", "transfer", "representative", "agent" - immediately agree to transfer them.`;
   }
 
+  // ===========================================================================
+  // CLEANUP & SUMMARY
+  // ===========================================================================
   async generateSummary() {
-    if (this.transcript.length < 2) return "Brief call - no significant conversation";
+    if (this.transcript.length < 2) return "Brief call - minimal conversation";
 
     try {
       const response = await this.openai.chat.completions.create({
@@ -712,7 +656,7 @@ RULES:
         messages: [
           {
             role: "system",
-            content: "Summarize this call in 1-2 sentences. Focus on: who called, why, and outcome.",
+            content: "Summarize this call in 1-2 sentences. Include: who called, why, and outcome.",
           },
           {
             role: "user",
@@ -721,10 +665,8 @@ RULES:
         ],
         max_tokens: 100,
       });
-
       return response.choices[0].message.content;
     } catch (error) {
-      console.error("⚠️ Summary error:", error.message);
       return "Summary unavailable";
     }
   }
@@ -732,29 +674,30 @@ RULES:
   async cleanup() {
     if (this.cleanedUp) return;
     this.cleanedUp = true;
-    console.log("🧹 Cleaning up...");
+    console.log("🧹 Cleaning up call...");
 
-    // Stop silence detection
     if (this.silenceTimer) {
       clearInterval(this.silenceTimer);
     }
 
-    // Process any remaining audio
-    if (this.audioBuffer.length > 0 && !this.isProcessing) {
+    if (this.audioBuffer.length > 0 && !this.isProcessing && this.hasSpeechInBuffer) {
       await this.processBufferedAudio();
     }
+
+    const callDuration = Math.round((Date.now() - this.callStartTime) / 1000);
+    console.log(`📞 Call duration: ${callDuration}s, Turns: ${this.turnCount}`);
 
     if (this.transcript.length > 0) {
       try {
         const summary = await this.generateSummary();
         console.log("📝 Summary:", summary);
 
-        // Update or create CallLog
         await this.prisma.callLog.upsert({
           where: { callSid: this.callSid },
           update: {
             handledByAI: true,
             transferredToHuman: this.transferredToHuman,
+            duration: callDuration,
             organizationId: this.organization?.id,
           },
           create: {
@@ -763,13 +706,13 @@ RULES:
             fromNumber: this.callerInfo.phone || "Unknown",
             toNumber: this.toNumber || "Unknown",
             status: "COMPLETED",
+            duration: callDuration,
             handledByAI: true,
             transferredToHuman: this.transferredToHuman,
             organizationId: this.organization?.id,
           },
         });
 
-        // Save Transcript
         await this.prisma.transcript.create({
           data: {
             callSid: this.callSid,
@@ -779,14 +722,12 @@ RULES:
             organizationId: this.organization?.id,
           },
         });
-        console.log("✅ Transcript saved");
 
-        // Save Lead if we have useful info
         if (this.callerInfo.name || this.callerInfo.reason) {
           await this.prisma.lead.create({
             data: {
               callSid: this.callSid,
-              name: this.callerInfo.name || "Unknown",
+              name: this.callerInfo.name || "Unknown Caller",
               phone: this.callerInfo.phone || "Unknown",
               email: this.callerInfo.email,
               company: this.callerInfo.company,
@@ -801,10 +742,12 @@ RULES:
               organizationId: this.organization?.id,
             },
           });
-          console.log("✅ Lead saved:", this.callerInfo.name);
+          console.log("✅ Lead saved:", this.callerInfo.name || "Unknown");
         }
+
+        console.log("✅ Call data saved");
       } catch (err) {
-        console.error("❌ Cleanup save error:", err.message);
+        console.error("❌ Save error:", err.message);
       }
     }
 

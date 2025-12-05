@@ -23,6 +23,7 @@ interface UseTwilioReturn {
   isMuted: boolean;
   callDuration: number;
   incomingCall: TwilioCall | null;
+  volume: number;
   // Actions
   makeCall: (phoneNumber: string) => Promise<void>;
   hangup: () => void;
@@ -30,6 +31,7 @@ interface UseTwilioReturn {
   acceptIncoming: () => void;
   rejectIncoming: () => void;
   sendDigits: (digits: string) => void;
+  setVolume: (volume: number) => void;
 }
 
 interface UseTwilioOptions {
@@ -47,9 +49,12 @@ export function useTwilio(options: UseTwilioOptions = {}): UseTwilioReturn {
   const [isRegistered, setIsRegistered] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
+  const [volume, setVolumeState] = useState(100);
 
   const timerRef = useRef<number | null>(null);
   const deviceRef = useRef<TwilioDevice | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
 
   // Initialize Twilio Device
   useEffect(() => {
@@ -265,6 +270,34 @@ export function useTwilio(options: UseTwilioOptions = {}): UseTwilioReturn {
     }
   }, [activeCall]);
 
+  // Set volume (0-100)
+  const setVolume = useCallback((newVolume: number) => {
+    const clampedVolume = Math.max(0, Math.min(100, newVolume));
+    setVolumeState(clampedVolume);
+
+    // Apply volume to all audio elements on the page
+    const audioElements = document.querySelectorAll('audio');
+    audioElements.forEach((audio) => {
+      audio.volume = clampedVolume / 100;
+    });
+
+    // Also try to control via Web Audio API if available
+    if (gainNodeRef.current) {
+      gainNodeRef.current.gain.value = clampedVolume / 100;
+    }
+  }, []);
+
+  // Apply volume when call becomes active
+  useEffect(() => {
+    if (activeCall) {
+      // Apply volume after a short delay for audio elements to be created
+      const timeoutId = setTimeout(() => {
+        setVolume(volume);
+      }, 500);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [activeCall, volume, setVolume]);
+
   return {
     device,
     activeCall,
@@ -274,11 +307,13 @@ export function useTwilio(options: UseTwilioOptions = {}): UseTwilioReturn {
     isMuted,
     callDuration,
     incomingCall,
+    volume,
     makeCall,
     hangup,
     toggleMute,
     acceptIncoming,
     rejectIncoming,
     sendDigits,
+    setVolume,
   };
 }

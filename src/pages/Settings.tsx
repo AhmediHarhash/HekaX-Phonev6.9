@@ -1,5 +1,6 @@
 // ============================================================================
 // HEKAX Phone - Settings Page
+// Professional SaaS Settings with CRM Integrations
 // ============================================================================
 
 import { useState, useRef, useEffect } from 'react';
@@ -14,10 +15,20 @@ import {
   Play,
   Square,
   Loader2,
-  User,
   Palette,
   Moon,
   Sun,
+  Link,
+  ExternalLink,
+  Trash2,
+  Settings2,
+  Webhook,
+  Database,
+  Shield,
+  ChevronRight,
+  Zap,
+  Globe,
+  X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { PageHeader } from '../components/layout';
@@ -35,10 +46,64 @@ const VOICE_OPTIONS = [
   { id: 'shimmer', name: 'Shimmer', description: 'Soft & gentle', gender: 'female' },
 ];
 
+// CRM Provider definitions
+const CRM_PROVIDERS = [
+  {
+    id: 'hubspot',
+    name: 'HubSpot',
+    description: 'Popular CRM for SMBs with free tier',
+    color: '#ff7a59',
+    features: ['Contacts', 'Deals', 'Tasks', 'Notes'],
+  },
+  {
+    id: 'salesforce',
+    name: 'Salesforce',
+    description: 'Enterprise CRM standard',
+    color: '#00a1e0',
+    features: ['Leads', 'Contacts', 'Tasks', 'Events'],
+  },
+  {
+    id: 'zoho',
+    name: 'Zoho CRM',
+    description: 'Affordable CRM for SMBs',
+    color: '#e42527',
+    features: ['Leads', 'Calls', 'Events', 'Notes'],
+  },
+  {
+    id: 'pipedrive',
+    name: 'Pipedrive',
+    description: 'Sales-focused CRM',
+    color: '#017737',
+    features: ['Persons', 'Activities', 'Deals', 'Notes'],
+  },
+];
+
 // Voice preview cache
 const voicePreviewCache: Record<string, string> = {};
 
-type SettingsTab = 'general' | 'ai' | 'notifications' | 'preferences';
+type SettingsTab = 'general' | 'ai' | 'integrations' | 'notifications' | 'preferences';
+
+interface CRMIntegration {
+  id: string;
+  provider: string;
+  enabled: boolean;
+  syncLeads: boolean;
+  syncCalls: boolean;
+  syncTranscripts: boolean;
+  syncAppointments: boolean;
+  lastSyncAt?: string;
+  lastSyncStatus?: string;
+  connectedBy?: { name: string; email: string };
+}
+
+interface CRMProvider {
+  id: string;
+  name: string;
+  description: string;
+  connected: boolean;
+  enabled: boolean;
+  configured: boolean;
+}
 
 export function SettingsPage() {
   const { org, updateOrg } = useAuth();
@@ -69,7 +134,6 @@ export function SettingsPage() {
 
   // Play voice preview
   const playVoicePreview = async (voice: string) => {
-    // Stop current playback
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.src = '';
@@ -77,10 +141,7 @@ export function SettingsPage() {
       setPlayingVoice(null);
     }
 
-    // If clicking same voice, just stop
-    if (playingVoice === voice) {
-      return;
-    }
+    if (playingVoice === voice) return;
 
     setLoadingVoice(voice);
     setMessage(null);
@@ -88,14 +149,11 @@ export function SettingsPage() {
     try {
       let audioUrl = voicePreviewCache[voice];
 
-      // If not cached, request from backend
       if (!audioUrl) {
-        console.log('Fetching voice preview for:', voice);
         const response = await api.post<{ audioUrl: string }>('/api/voice/preview', {
           voiceId: voice,
           text: 'Hi, thank you for calling. How may I help you today?',
         });
-        console.log('Got response:', response);
 
         if (!response.audioUrl) {
           throw new Error('No audio URL received from server');
@@ -105,64 +163,28 @@ export function SettingsPage() {
         voicePreviewCache[voice] = audioUrl;
       }
 
-      // Create audio element
       const audio = new Audio();
       audioRef.current = audio;
 
-      // Set up promise-based loading
       const loadPromise = new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Audio loading timeout'));
-        }, 10000);
-
-        audio.oncanplaythrough = () => {
-          clearTimeout(timeout);
-          resolve();
-        };
-
-        audio.onerror = () => {
-          clearTimeout(timeout);
-          reject(new Error('Failed to load audio'));
-        };
+        const timeout = setTimeout(() => reject(new Error('Audio loading timeout')), 10000);
+        audio.oncanplaythrough = () => { clearTimeout(timeout); resolve(); };
+        audio.onerror = () => { clearTimeout(timeout); reject(new Error('Failed to load audio')); };
       });
 
-      audio.onended = () => {
-        console.log('Audio playback ended');
-        setPlayingVoice(null);
-      };
-
-      // Set source and start loading
+      audio.onended = () => setPlayingVoice(null);
       audio.src = audioUrl;
       audio.load();
 
-      // Wait for audio to be ready
       await loadPromise;
-
-      // Try to play
-      try {
-        await audio.play();
-        console.log('Audio playing successfully');
-        setPlayingVoice(voice);
-        setLoadingVoice(null);
-      } catch (playErr) {
-        console.error('Play error:', playErr);
-        setLoadingVoice(null);
-        // Clear cache on play error
-        delete voicePreviewCache[voice];
-        setMessage({ type: 'error', text: 'Click the play button again to hear the voice' });
-      }
-
-    } catch (err) {
-      console.error('Voice preview error:', err);
+      await audio.play();
+      setPlayingVoice(voice);
       setLoadingVoice(null);
-      // Clear cache on error
+    } catch (err) {
+      setLoadingVoice(null);
       delete voicePreviewCache[voice];
-
       const errorMessage = err instanceof Error ? err.message : 'Failed to load voice preview';
-      setMessage({
-        type: 'error',
-        text: errorMessage.includes('OpenAI') ? errorMessage : `Voice preview unavailable: ${errorMessage}`
-      });
+      setMessage({ type: 'error', text: errorMessage });
     }
   };
 
@@ -177,7 +199,7 @@ export function SettingsPage() {
         voiceId,
         slackWebhookUrl: slackWebhook || undefined,
       });
-      
+
       updateOrg({ ...org!, ...updated });
       setMessage({ type: 'success', text: 'Settings saved successfully!' });
     } catch (err) {
@@ -190,19 +212,20 @@ export function SettingsPage() {
   const tabs = [
     { id: 'general', label: 'General', icon: Building },
     { id: 'ai', label: 'AI Receptionist', icon: Volume2 },
+    { id: 'integrations', label: 'Integrations', icon: Link },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'preferences', label: 'Preferences', icon: Palette },
   ] as const;
 
   return (
-    <div>
+    <div className="animate-fade-in">
       <PageHeader
         title="Settings"
-        subtitle="Manage your organization settings"
+        subtitle="Manage your organization settings and integrations"
       />
 
-      {/* Tabs */}
-      <div className="flex gap-2 mb-6">
+      {/* Tabs - Responsive */}
+      <div className="flex flex-wrap gap-2 mb-6">
         {tabs.map(tab => {
           const Icon = tab.icon;
           return (
@@ -210,16 +233,16 @@ export function SettingsPage() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={`
-                flex items-center gap-2 px-4 py-2.5 rounded-lg
-                font-medium text-sm transition-colors border
+                flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg
+                font-medium text-sm transition-all
                 ${activeTab === tab.id
-                  ? 'bg-blue-600 border-blue-600 text-white'
-                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-blue-500'
+                  ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-lg shadow-blue-500/20'
+                  : 'bg-slate-800/50 border border-slate-700 text-slate-400 hover:border-blue-500/50 hover:text-slate-200'
                 }
               `}
             >
               <Icon size={18} />
-              {tab.label}
+              <span className="hidden sm:inline">{tab.label}</span>
             </button>
           );
         })}
@@ -227,27 +250,33 @@ export function SettingsPage() {
 
       {/* Message */}
       {message && (
-        <div 
+        <div
           className={`
-            mb-6 p-4 rounded-lg flex items-center gap-3
-            ${message.type === 'success' 
-              ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' 
+            mb-6 p-4 rounded-xl flex items-center gap-3 animate-slide-in
+            ${message.type === 'success'
+              ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
               : 'bg-red-500/10 border border-red-500/20 text-red-400'
             }
           `}
         >
           {message.type === 'success' ? <Check size={18} /> : <AlertCircle size={18} />}
           {message.text}
+          <button onClick={() => setMessage(null)} className="ml-auto hover:opacity-70">
+            <X size={16} />
+          </button>
         </div>
       )}
 
       {/* Settings Content */}
-      <Card>
+      <Card padding="lg" className="transition-all">
         {/* General Tab */}
         {activeTab === 'general' && (
           <div className="space-y-6">
-            <h3 className="text-lg font-semibold text-white mb-4">Organization Details</h3>
-            
+            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+              <Building size={20} className="text-blue-400" />
+              Organization Details
+            </h3>
+
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-2">
                 Organization Name
@@ -271,13 +300,13 @@ export function SettingsPage() {
               <label className="block text-sm font-medium text-slate-300 mb-2">
                 Plan
               </label>
-              <div className="flex items-center gap-3 max-w-md">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 max-w-md">
                 <input
                   type="text"
                   value={org?.plan === 'TRIAL' ? 'Free Trial' : org?.plan || 'Free Trial'}
                   disabled
                   className="
-                    flex-1 px-4 py-2.5 rounded-lg
+                    w-full sm:flex-1 px-4 py-2.5 rounded-lg
                     bg-slate-900/50 border border-slate-700
                     text-slate-400 cursor-not-allowed
                   "
@@ -285,18 +314,12 @@ export function SettingsPage() {
                 {(org?.plan === 'TRIAL' || !org?.plan) && (
                   <button
                     onClick={() => window.dispatchEvent(new CustomEvent('navigate', { detail: 'billing' }))}
-                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors"
+                    className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white rounded-lg text-sm font-medium transition-all shadow-lg shadow-blue-500/20"
                   >
                     Upgrade
                   </button>
                 )}
               </div>
-              <p className="mt-1.5 text-sm text-slate-500">
-                {org?.plan === 'TRIAL' || !org?.plan
-                  ? 'Upgrade to unlock more features and remove trial limitations'
-                  : 'Go to Billing page to manage your subscription'
-                }
-              </p>
             </div>
           </div>
         )}
@@ -304,34 +327,30 @@ export function SettingsPage() {
         {/* AI Tab */}
         {activeTab === 'ai' && (
           <div className="space-y-6">
-            <h3 className="text-lg font-semibold text-white mb-4">AI Receptionist Settings</h3>
-            
+            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+              <Volume2 size={20} className="text-purple-400" />
+              AI Receptionist Settings
+            </h3>
+
             {/* AI Enabled Toggle */}
-            <div className="flex items-center justify-between max-w-md">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 max-w-md p-4 rounded-xl bg-slate-800/30 border border-slate-700/50">
               <div>
-                <label className="text-sm font-medium text-slate-300">
+                <label className="text-sm font-medium text-white">
                   Enable AI Receptionist
                 </label>
                 <p className="text-sm text-slate-500">
-                  When disabled, calls will ring directly to your team
+                  When disabled, calls ring directly to your team
                 </p>
               </div>
-              <label className="relative inline-block w-12 h-6 cursor-pointer">
+              <label className="relative inline-block w-12 h-6 cursor-pointer flex-shrink-0">
                 <input
                   type="checkbox"
                   checked={aiEnabled}
                   onChange={(e) => setAiEnabled(e.target.checked)}
                   className="sr-only peer"
                 />
-                <div className="
-                  w-12 h-6 rounded-full
-                  bg-slate-700 peer-checked:bg-emerald-600
-                  transition-colors
-                " />
-                <div className="
-                  absolute left-1 top-1 w-4 h-4 rounded-full bg-white
-                  transition-transform peer-checked:translate-x-6
-                " />
+                <div className="w-12 h-6 rounded-full bg-slate-700 peer-checked:bg-emerald-600 transition-colors" />
+                <div className="absolute left-1 top-1 w-4 h-4 rounded-full bg-white transition-transform peer-checked:translate-x-6" />
               </label>
             </div>
 
@@ -349,8 +368,8 @@ export function SettingsPage() {
                   w-full max-w-md px-4 py-3 rounded-lg
                   bg-slate-900 border border-slate-700
                   text-white placeholder-slate-500
-                  focus:outline-none focus:border-blue-500
-                  resize-none
+                  focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500
+                  resize-none transition-all
                 "
               />
               <p className="mt-1.5 text-sm text-slate-500">
@@ -371,7 +390,7 @@ export function SettingsPage() {
                     className={`
                       relative p-4 rounded-xl border cursor-pointer transition-all
                       ${voiceId === voice.id
-                        ? 'bg-blue-500/10 border-blue-500'
+                        ? 'bg-blue-500/10 border-blue-500 shadow-lg shadow-blue-500/10'
                         : 'bg-slate-800/50 border-slate-700 hover:border-slate-600'
                       }
                     `}
@@ -397,8 +416,7 @@ export function SettingsPage() {
                         }}
                         disabled={loadingVoice === voice.id}
                         className={`
-                          w-8 h-8 rounded-full flex items-center justify-center
-                          transition-colors
+                          w-8 h-8 rounded-full flex items-center justify-center transition-all
                           ${playingVoice === voice.id
                             ? 'bg-blue-600 text-white'
                             : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
@@ -422,19 +440,21 @@ export function SettingsPage() {
                   </div>
                 ))}
               </div>
-              <p className="mt-3 text-sm text-slate-500">
-                Click the play button to preview each voice
-              </p>
             </div>
           </div>
         )}
 
+        {/* Integrations Tab */}
+        {activeTab === 'integrations' && <IntegrationsTab setMessage={setMessage} />}
+
         {/* Notifications Tab */}
         {activeTab === 'notifications' && (
           <div className="space-y-6">
-            <h3 className="text-lg font-semibold text-white mb-4">Notification Settings</h3>
-            
-            {/* Slack Webhook */}
+            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+              <Bell size={20} className="text-orange-400" />
+              Notification Settings
+            </h3>
+
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-2">
                 Slack Webhook URL
@@ -448,7 +468,8 @@ export function SettingsPage() {
                   w-full max-w-md px-4 py-2.5 rounded-lg
                   bg-slate-900 border border-slate-700
                   text-white placeholder-slate-500
-                  focus:outline-none focus:border-blue-500
+                  focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500
+                  transition-all
                 "
               />
               <p className="mt-1.5 text-sm text-slate-500">
@@ -456,8 +477,7 @@ export function SettingsPage() {
               </p>
             </div>
 
-            {/* Notification Preview */}
-            <div className="max-w-md p-4 bg-slate-900/50 rounded-lg border border-slate-700">
+            <div className="max-w-md p-4 bg-slate-900/50 rounded-xl border border-slate-700">
               <h4 className="text-sm font-medium text-slate-300 mb-3">
                 You'll receive notifications for:
               </h4>
@@ -480,41 +500,448 @@ export function SettingsPage() {
         {/* Preferences Tab */}
         {activeTab === 'preferences' && <PreferencesTab />}
 
-        {/* Save Button */}
-        <div className="mt-8 pt-6 border-t border-slate-700">
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? (
-              <>
-                <RefreshCw size={18} className="animate-spin" />
-                Saving...
-              </>
-            ) : (
-              <>
-                <Save size={18} />
-                Save Changes
-              </>
-            )}
-          </Button>
-        </div>
+        {/* Save Button - Only show for relevant tabs */}
+        {(activeTab === 'general' || activeTab === 'ai' || activeTab === 'notifications') && (
+          <div className="mt-8 pt-6 border-t border-slate-700">
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? (
+                <>
+                  <RefreshCw size={18} className="animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save size={18} />
+                  Save Changes
+                </>
+              )}
+            </Button>
+          </div>
+        )}
       </Card>
     </div>
   );
 }
 
+// ============================================================================
+// Integrations Tab Component
+// ============================================================================
+function IntegrationsTab({ setMessage }: { setMessage: (msg: { type: 'success' | 'error'; text: string } | null) => void }) {
+  const [providers, setProviders] = useState<CRMProvider[]>([]);
+  const [integrations, setIntegrations] = useState<CRMIntegration[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [connecting, setConnecting] = useState<string | null>(null);
+  const [showWebhookModal, setShowWebhookModal] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState('');
+  const [webhookSecret, setWebhookSecret] = useState('');
+  const [savingWebhook, setSavingWebhook] = useState(false);
+
+  // Fetch CRM providers and integrations
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    try {
+      const [providersRes, integrationsRes] = await Promise.all([
+        api.get<{ providers: CRMProvider[] }>('/api/crm/providers'),
+        api.get<{ integrations: CRMIntegration[] }>('/api/crm/integrations'),
+      ]);
+      setProviders(providersRes.providers || []);
+      setIntegrations(integrationsRes.integrations || []);
+    } catch (err) {
+      console.error('Failed to load CRM data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const connectCRM = async (providerId: string) => {
+    if (providerId === 'webhook') {
+      setShowWebhookModal(true);
+      return;
+    }
+
+    setConnecting(providerId);
+    try {
+      const response = await api.get<{ authUrl: string }>(`/api/crm/connect/${providerId}`);
+      if (response.authUrl) {
+        window.location.href = response.authUrl;
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: `Failed to connect to ${providerId}` });
+    } finally {
+      setConnecting(null);
+    }
+  };
+
+  const disconnectCRM = async (integrationId: string, providerName: string) => {
+    if (!confirm(`Are you sure you want to disconnect ${providerName}?`)) return;
+
+    try {
+      await api.delete(`/api/crm/integrations/${integrationId}`);
+      setIntegrations(prev => prev.filter(i => i.id !== integrationId));
+      setMessage({ type: 'success', text: `${providerName} disconnected` });
+    } catch (err) {
+      setMessage({ type: 'error', text: 'Failed to disconnect' });
+    }
+  };
+
+  const saveWebhook = async () => {
+    if (!webhookUrl) {
+      setMessage({ type: 'error', text: 'Webhook URL is required' });
+      return;
+    }
+
+    setSavingWebhook(true);
+    try {
+      await api.post('/api/crm/webhook', {
+        webhookUrl,
+        secret: webhookSecret || undefined,
+        syncLeads: true,
+        syncCalls: true,
+        syncAppointments: true,
+      });
+      setMessage({ type: 'success', text: 'Webhook configured successfully' });
+      setShowWebhookModal(false);
+      setWebhookUrl('');
+      setWebhookSecret('');
+      fetchData();
+    } catch (err) {
+      setMessage({ type: 'error', text: 'Failed to save webhook' });
+    } finally {
+      setSavingWebhook(false);
+    }
+  };
+
+  const getProviderInfo = (providerId: string) => {
+    return CRM_PROVIDERS.find(p => p.id === providerId.toLowerCase());
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 size={24} className="animate-spin text-blue-400" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8">
+      {/* Connected Integrations */}
+      {integrations.length > 0 && (
+        <div>
+          <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+            <Shield size={20} className="text-emerald-400" />
+            Connected Integrations
+          </h3>
+          <div className="space-y-3">
+            {integrations.map((integration) => {
+              const info = getProviderInfo(integration.provider);
+              return (
+                <div
+                  key={integration.id}
+                  className="p-4 rounded-xl bg-slate-800/50 border border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                >
+                  <div className="flex items-center gap-4">
+                    <div
+                      className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg"
+                      style={{ backgroundColor: info?.color || '#3b82f6' }}
+                    >
+                      {integration.provider[0]}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-white">
+                          {info?.name || integration.provider}
+                        </span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${
+                          integration.enabled
+                            ? 'bg-emerald-500/20 text-emerald-400'
+                            : 'bg-slate-500/20 text-slate-400'
+                        }`}>
+                          {integration.enabled ? 'Active' : 'Disabled'}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        {integration.syncLeads && (
+                          <span className="text-xs text-slate-500">Leads</span>
+                        )}
+                        {integration.syncCalls && (
+                          <span className="text-xs text-slate-500">Calls</span>
+                        )}
+                        {integration.syncTranscripts && (
+                          <span className="text-xs text-slate-500">Transcripts</span>
+                        )}
+                        {integration.syncAppointments && (
+                          <span className="text-xs text-slate-500">Appointments</span>
+                        )}
+                      </div>
+                      {integration.lastSyncAt && (
+                        <p className="text-xs text-slate-500 mt-1">
+                          Last sync: {new Date(integration.lastSyncAt).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {}}
+                      className="p-2 rounded-lg bg-slate-700/50 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+                      title="Settings"
+                    >
+                      <Settings2 size={18} />
+                    </button>
+                    <button
+                      onClick={() => disconnectCRM(integration.id, info?.name || integration.provider)}
+                      className="p-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors"
+                      title="Disconnect"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Available CRM Providers */}
+      <div>
+        <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+          <Database size={20} className="text-blue-400" />
+          CRM Integrations
+        </h3>
+        <p className="text-sm text-slate-400 mb-4">
+          Connect your CRM to automatically sync leads, calls, and appointments
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {CRM_PROVIDERS.map((provider) => {
+            const isConnected = integrations.some(i => i.provider.toLowerCase() === provider.id);
+            const apiProvider = providers.find(p => p.id === provider.id);
+            const isConfigured = apiProvider?.configured !== false;
+
+            return (
+              <div
+                key={provider.id}
+                className={`
+                  p-5 rounded-xl border transition-all
+                  ${isConnected
+                    ? 'bg-slate-800/30 border-emerald-500/30'
+                    : 'bg-slate-800/50 border-slate-700 hover:border-slate-600'
+                  }
+                `}
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold"
+                      style={{ backgroundColor: provider.color }}
+                    >
+                      {provider.name[0]}
+                    </div>
+                    <div>
+                      <h4 className="font-medium text-white">{provider.name}</h4>
+                      <p className="text-xs text-slate-400">{provider.description}</p>
+                    </div>
+                  </div>
+                  {isConnected && (
+                    <span className="text-xs px-2 py-1 rounded-full bg-emerald-500/20 text-emerald-400">
+                      Connected
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 mb-4">
+                  {provider.features.map(feature => (
+                    <span key={feature} className="text-xs px-2 py-0.5 rounded bg-slate-700/50 text-slate-400">
+                      {feature}
+                    </span>
+                  ))}
+                </div>
+
+                {!isConnected && (
+                  <button
+                    onClick={() => connectCRM(provider.id)}
+                    disabled={connecting === provider.id || !isConfigured}
+                    className={`
+                      w-full py-2.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2
+                      ${isConfigured
+                        ? 'bg-slate-700 hover:bg-slate-600 text-white'
+                        : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                      }
+                    `}
+                  >
+                    {connecting === provider.id ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <>
+                        <ExternalLink size={16} />
+                        {isConfigured ? 'Connect' : 'Not Configured'}
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Webhook Integration */}
+      <div>
+        <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+          <Webhook size={20} className="text-purple-400" />
+          Custom Webhook
+        </h3>
+        <p className="text-sm text-slate-400 mb-4">
+          Connect any system via Zapier, Make (Integromat), n8n, or your own endpoint
+        </p>
+
+        <div className="p-5 rounded-xl bg-slate-800/50 border border-slate-700">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+                <Zap size={20} className="text-white" />
+              </div>
+              <div>
+                <h4 className="font-medium text-white">Custom Webhook</h4>
+                <p className="text-xs text-slate-400">Send events to any HTTP endpoint</p>
+              </div>
+            </div>
+
+            {integrations.some(i => i.provider === 'WEBHOOK') ? (
+              <span className="text-xs px-2 py-1 rounded-full bg-emerald-500/20 text-emerald-400">
+                Configured
+              </span>
+            ) : (
+              <button
+                onClick={() => setShowWebhookModal(true)}
+                className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm font-medium transition-colors flex items-center gap-2"
+              >
+                <Globe size={16} />
+                Configure
+              </button>
+            )}
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-slate-700">
+            <p className="text-xs text-slate-500 mb-2">Supported events:</p>
+            <div className="flex flex-wrap gap-2">
+              {['lead.captured', 'call.completed', 'appointment.created', 'call.transferred'].map(event => (
+                <span key={event} className="text-xs px-2 py-0.5 rounded bg-slate-700/50 text-slate-400 font-mono">
+                  {event}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Webhook Modal */}
+      {showWebhookModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-md p-6 animate-slide-in">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-semibold text-white">Configure Webhook</h3>
+              <button
+                onClick={() => setShowWebhookModal(false)}
+                className="p-2 rounded-lg hover:bg-slate-700 text-slate-400"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Webhook URL *
+                </label>
+                <input
+                  type="url"
+                  value={webhookUrl}
+                  onChange={(e) => setWebhookUrl(e.target.value)}
+                  placeholder="https://your-endpoint.com/webhook"
+                  className="
+                    w-full px-4 py-2.5 rounded-lg
+                    bg-slate-900 border border-slate-700
+                    text-white placeholder-slate-500
+                    focus:outline-none focus:border-blue-500
+                  "
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Secret (Optional)
+                </label>
+                <input
+                  type="password"
+                  value={webhookSecret}
+                  onChange={(e) => setWebhookSecret(e.target.value)}
+                  placeholder="Used for HMAC signature verification"
+                  className="
+                    w-full px-4 py-2.5 rounded-lg
+                    bg-slate-900 border border-slate-700
+                    text-white placeholder-slate-500
+                    focus:outline-none focus:border-blue-500
+                  "
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  We'll sign payloads with this secret using HMAC-SHA256
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={() => setShowWebhookModal(false)}
+                  className="flex-1 px-4 py-2.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveWebhook}
+                  disabled={savingWebhook || !webhookUrl}
+                  className="flex-1 px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                >
+                  {savingWebhook ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <>
+                      <Check size={16} />
+                      Save
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
 // Preferences Tab Component
+// ============================================================================
 function PreferencesTab() {
   const { preferences, setTheme, setCompactMode, setTimezone } = usePreferences();
 
   return (
     <div className="space-y-6">
-      <h3 className="text-lg font-semibold text-white mb-4">User Preferences</h3>
+      <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+        <Palette size={20} className="text-pink-400" />
+        User Preferences
+      </h3>
 
       {/* Theme Selection */}
       <div>
         <label className="block text-sm font-medium text-slate-300 mb-3">
           Theme
         </label>
-        <div className="flex gap-3 max-w-md">
+        <div className="flex flex-col sm:flex-row gap-3 max-w-md">
           <button
             onClick={() => setTheme('dark')}
             className={`
@@ -530,9 +957,6 @@ function PreferencesTab() {
               <span className="text-white font-medium">Dark</span>
             </div>
             <p className="text-xs text-slate-500 mt-2">Easier on the eyes</p>
-            {preferences.theme === 'dark' && (
-              <div className="mt-2 text-xs text-blue-400 font-medium">Active</div>
-            )}
           </button>
           <button
             onClick={() => setTheme('light')}
@@ -549,9 +973,6 @@ function PreferencesTab() {
               <span className="text-white font-medium">Light</span>
             </div>
             <p className="text-xs text-slate-500 mt-2">Clean & bright</p>
-            {preferences.theme === 'light' && (
-              <div className="mt-2 text-xs text-blue-400 font-medium">Active</div>
-            )}
           </button>
         </div>
       </div>
@@ -591,35 +1012,27 @@ function PreferencesTab() {
       </div>
 
       {/* Compact Mode */}
-      <div className="flex items-center justify-between max-w-md p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 max-w-md p-4 rounded-xl bg-slate-800/50 border border-slate-700">
         <div>
           <label className="text-sm font-medium text-white">
             Compact Mode
           </label>
           <p className="text-sm text-slate-500 mt-0.5">
-            Reduce spacing for more content on screen
+            Reduce spacing for more content
           </p>
         </div>
-        <label className="relative inline-block w-12 h-6 cursor-pointer">
+        <label className="relative inline-block w-12 h-6 cursor-pointer flex-shrink-0">
           <input
             type="checkbox"
             checked={preferences.compactMode}
             onChange={(e) => setCompactMode(e.target.checked)}
             className="sr-only peer"
           />
-          <div className="
-            w-12 h-6 rounded-full
-            bg-slate-700 peer-checked:bg-blue-600
-            transition-colors
-          " />
-          <div className="
-            absolute left-1 top-1 w-4 h-4 rounded-full bg-white
-            transition-transform peer-checked:translate-x-6
-          " />
+          <div className="w-12 h-6 rounded-full bg-slate-700 peer-checked:bg-blue-600 transition-colors" />
+          <div className="absolute left-1 top-1 w-4 h-4 rounded-full bg-white transition-transform peer-checked:translate-x-6" />
         </label>
       </div>
 
-      {/* Preferences are auto-saved notice */}
       <p className="text-xs text-slate-500 mt-4">
         Preferences are saved automatically to your browser
       </p>

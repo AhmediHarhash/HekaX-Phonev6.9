@@ -67,8 +67,10 @@ class AIReceptionist {
     this.audioBuffer = [];
     this.silenceTimer = null;
     this.lastAudioTime = Date.now();
+    this.lastSpeechTime = Date.now(); // When we last detected actual speech
     this.SILENCE_THRESHOLD_MS = 1500; // 1.5 seconds of silence = end of speech
     this.MIN_AUDIO_LENGTH = 3200; // Minimum ~0.2 seconds of audio to process
+    this.SPEECH_THRESHOLD = 20; // Audio level threshold to detect speech (0-128 for mulaw)
 
     // Conversation history
     this.conversationHistory = [];
@@ -123,21 +125,22 @@ class AIReceptionist {
   startSilenceDetection() {
     // Check every 500ms if we have audio to process
     this.silenceTimer = setInterval(async () => {
-      const timeSinceLastAudio = Date.now() - this.lastAudioTime;
+      const timeSinceLastSpeech = Date.now() - this.lastSpeechTime;
 
       // Debug log every 5 seconds
       if (Date.now() % 5000 < 500) {
-        console.log(`🔍 Status: buffer=${this.audioBuffer.length}, silence=${Math.round(timeSinceLastAudio/1000)}s, processing=${this.isProcessing}, speaking=${this.isSpeaking}`);
+        console.log(`🔍 Status: buffer=${this.audioBuffer.length}, speechSilence=${Math.round(timeSinceLastSpeech/1000)}s, processing=${this.isProcessing}, speaking=${this.isSpeaking}`);
       }
 
-      // If we have audio buffered and enough silence has passed
+      // If we have audio buffered and enough SPEECH silence has passed
+      // (meaning caller stopped talking, even if background noise continues)
       if (
         this.audioBuffer.length > 0 &&
-        timeSinceLastAudio > this.SILENCE_THRESHOLD_MS &&
+        timeSinceLastSpeech > this.SILENCE_THRESHOLD_MS &&
         !this.isProcessing &&
         !this.isSpeaking
       ) {
-        console.log("🎯 Silence detected, processing audio...");
+        console.log(`🎯 Speech silence detected (${Math.round(timeSinceLastSpeech/1000)}s), processing audio...`);
         await this.processBufferedAudio();
       }
     }, 500);
@@ -152,10 +155,27 @@ class AIReceptionist {
     this.audioBuffer.push(audioData);
     this.lastAudioTime = Date.now();
 
+    // Detect if this chunk contains actual speech (not just silence/noise)
+    const audioLevel = this.getAudioLevel(audioData);
+    if (audioLevel > this.SPEECH_THRESHOLD) {
+      this.lastSpeechTime = Date.now();
+    }
+
     // Log occasionally to confirm audio is being received
     if (this.audioBuffer.length % 100 === 0) {
-      console.log(`🎤 Audio buffered: ${this.audioBuffer.length} chunks (${Math.round(this.audioBuffer.length * 20 / 1000)}s)`);
+      console.log(`🎤 Audio buffered: ${this.audioBuffer.length} chunks (${Math.round(this.audioBuffer.length * 20 / 1000)}s), level=${audioLevel}`);
     }
+  }
+
+  // Calculate audio level from mulaw data (0-128 scale)
+  getAudioLevel(audioData) {
+    let sum = 0;
+    for (let i = 0; i < audioData.length; i++) {
+      // Mulaw: 0xFF is silence, deviation from 0xFF indicates sound
+      const deviation = Math.abs(audioData[i] - 0xFF);
+      sum += deviation;
+    }
+    return Math.round(sum / audioData.length);
   }
 
   async processBufferedAudio() {

@@ -155,32 +155,18 @@ router.post(
         return { org, user };
       });
 
-      // Create Twilio subaccount (async, don't block registration)
-      try {
-        const subaccount = await twilioService.createSubaccount(
-          result.org.id,
-          orgNameFinal
-        );
-        console.log(
-          "✅ Twilio subaccount created for:",
-          orgNameFinal,
-          subaccount.sid
-        );
-
-        // Create TwiML App for the subaccount
-        const webhookBaseUrl =
-          process.env.PUBLIC_BASE_URL || "https://phoneapi.hekax.com";
-        await twilioService.createTwimlApp(
-          result.org.id,
-          orgNameFinal,
-          webhookBaseUrl
-        );
-      } catch (twilioErr) {
-        console.error(
-          "⚠️ Twilio subaccount creation failed:",
-          twilioErr.message
-        );
-      }
+      // Full Twilio provisioning (async, don't block registration)
+      // Creates: Subaccount + TwiML App + API Key
+      twilioService.provisionOrganization(result.org.id, orgNameFinal)
+        .then((provisionResult) => {
+          console.log("✅ Full Twilio provisioning complete for:", orgNameFinal);
+          console.log("   Subaccount:", provisionResult.subaccount?.sid);
+          console.log("   TwiML App:", provisionResult.twimlApp?.sid);
+        })
+        .catch((twilioErr) => {
+          console.error("⚠️ Twilio provisioning failed:", twilioErr.message);
+          // User can still use the app, just need to provision later
+        });
 
       // Create token pair
       const tokens = createTokenPair(result.user, result.org.id);

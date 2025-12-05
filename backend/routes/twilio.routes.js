@@ -37,12 +37,13 @@ router.post(
 
     try {
       // Look up which organization owns this phone number
-      const phoneRecord = await prisma.phoneNumber.findFirst({
+      // First check PhoneNumber table
+      let phoneRecord = await prisma.phoneNumber.findFirst({
         where: { number: calledNumber, status: "active" },
         include: {
           organization: {
             include: {
-              members: {
+              memberships: {
                 where: { role: { in: ["OWNER", "ADMIN"] } },
                 take: 1,
                 include: { user: true },
@@ -52,19 +53,38 @@ router.post(
         },
       });
 
-      if (!phoneRecord) {
+      let org = phoneRecord?.organization;
+
+      // If not found, check Organization.twilioNumber field
+      if (!org) {
+        org = await prisma.organization.findFirst({
+          where: { twilioNumber: calledNumber },
+          include: {
+            memberships: {
+              where: { role: { in: ["OWNER", "ADMIN"] } },
+              take: 1,
+              include: { user: true },
+            },
+          },
+        });
+        if (org) {
+          console.log("📞 Found org via twilioNumber field:", org.name);
+        }
+      }
+
+      if (!org) {
         console.log("⚠️ Phone number not found in database, using fallback");
       }
 
-      const org = phoneRecord?.organization;
       const aiEnabled =
         phoneRecord?.routeToAI ??
+        org?.aiEnabled ??
         process.env.AI_RECEPTIONIST_ENABLED === "true";
 
       // Determine client identity for this organization
-      const primaryMember = org?.members?.[0];
+      const primaryMember = org?.memberships?.[0];
       const clientIdentity = primaryMember?.user?.id
-        ? `${primaryMember.user.id}-web`
+        ? `${primaryMember.user.id}-${Date.now()}`
         : "fallback-web";
 
       console.log("📞 Routing to:", { orgId: org?.id, aiEnabled, clientIdentity });

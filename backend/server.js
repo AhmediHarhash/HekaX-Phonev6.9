@@ -282,6 +282,10 @@ try {
   const provisioningRoutes = require("./routes/provisioning.routes");
   app.use("/api/provisioning", provisioningRoutes);
 
+  // Calendar integrations
+  const calendarRoutes = require("./routes/calendar.routes");
+  app.use("/api/calendar", calendarRoutes);
+
   console.log("✅ API routes loaded");
 } catch (err) {
   console.error("❌ API routes error:", err);

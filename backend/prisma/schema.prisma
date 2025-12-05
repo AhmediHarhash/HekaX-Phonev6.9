@@ -217,6 +217,8 @@ model Organization {
   usageAlerts     UsageAlert[]
   apiKeys         ApiKey[]
   addonPurchases  AddOnPurchase[]
+  calendarIntegrations CalendarIntegration[]
+  calendarBookings     CalendarBooking[]
 
   @@index([slug])
   @@index([status])
@@ -261,6 +263,7 @@ model User {
 
   assignedLeads Lead[]    @relation("AssignedAgent")
   callsHandled  CallLog[] @relation("HandledBy")
+  calendarConnections CalendarIntegration[] @relation("CalendarConnectedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -732,4 +735,110 @@ model AddOnPurchase {
   @@index([organizationId])
   @@index([status])
   @@index([purchasedAt])
+}
+
+// ============================================================================
+// CALENDAR INTEGRATIONS
+// ============================================================================
+
+enum CalendarProviderType {
+  GOOGLE
+  OUTLOOK
+  CALENDLY
+}
+
+enum CalendarBookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+model CalendarIntegration {
+  id String @id @default(cuid())
+
+  provider    CalendarProviderType
+  enabled     Boolean              @default(true)
+
+  // OAuth tokens (encrypted in production)
+  accessToken    String  @db.Text
+  refreshToken   String? @db.Text
+  tokenExpiresAt DateTime?
+
+  // Calendar-specific settings
+  calendarId      String? // Primary calendar ID
+  calendarName    String?
+  webhookId       String? // For Calendly webhooks
+  defaultDuration Int     @default(30) // Default meeting duration in minutes
+
+  // Business hours (JSON)
+  businessHours Json? // { start: 9, end: 17, days: [1,2,3,4,5], timezone: "America/New_York" }
+
+  // Provider-specific data
+  userUri         String? // Calendly user URI
+  organizationUri String? // Calendly organization URI
+  eventTypeUri    String? // Calendly event type URI
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // Who connected it
+  connectedById String?
+  connectedBy   User?   @relation("CalendarConnectedBy", fields: [connectedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bookings CalendarBooking[]
+
+  @@unique([organizationId, provider])
+  @@index([organizationId])
+  @@index([provider])
+}
+
+model CalendarBooking {
+  id String @id @default(cuid())
+
+  // Event details
+  eventId    String? // External calendar event ID
+  eventLink  String? // Link to calendar event
+  meetLink   String? // Video meeting link (Google Meet, Teams, Zoom)
+
+  // Caller info
+  callerName  String
+  callerPhone String
+  callerEmail String?
+  purpose     String?
+
+  // Scheduling
+  scheduledAt DateTime
+  duration    Int      @default(30) // Duration in minutes
+  timezone    String   @default("America/New_York")
+
+  // Status
+  status         CalendarBookingStatus @default(PENDING)
+  cancelledAt    DateTime?
+  cancelReason   String?
+  completedAt    DateTime?
+  noShowMarkedAt DateTime?
+
+  // Source
+  callSid    String? // Call that initiated the booking
+  bookedByAI Boolean @default(true)
+
+  // Relations
+  calendarIntegrationId String?
+  calendarIntegration   CalendarIntegration? @relation(fields: [calendarIntegrationId], references: [id])
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([scheduledAt])
+  @@index([status])
+  @@index([callerPhone])
 }

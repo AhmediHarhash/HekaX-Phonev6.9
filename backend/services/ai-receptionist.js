@@ -362,7 +362,7 @@ class AIReceptionist {
           { role: "system", content: this.getSystemPrompt() },
           ...this.conversationHistory,
         ],
-        max_tokens: 150,
+        max_completion_tokens: 150,
         temperature: 0.7,
       });
 
@@ -416,7 +416,7 @@ Rules:
 Text: "${userText}"`,
           },
         ],
-        max_tokens: 150,
+        max_completion_tokens: 150,
         response_format: { type: "json_object" },
       });
 
@@ -492,29 +492,23 @@ Text: "${userText}"`,
       this.consecutiveSpeechChunks = 0;
       this.consecutiveSilenceChunks = 0;
 
-      const safetyTimeout = setTimeout(() => {
-        if (this.isSpeaking) {
-          console.log("⚠️ Speaking timeout, resetting");
-          this.isSpeaking = false;
-        }
-      }, 20000);
-
       const audioBuffer = await this.textToSpeech(text);
       if (audioBuffer) {
         await this.sendAudioToTwilio(audioBuffer);
       }
 
-      clearTimeout(safetyTimeout);
+      // Reset speaking flag IMMEDIATELY after sending audio
+      // The sendAudioToTwilio function blocks until all audio is sent
+      this.isSpeaking = false;
+      this.lastSpeechTime = Date.now(); // Reset timer for new speech detection
+      this.audioBuffer = []; // Clear any audio that came during speaking
+      console.log("🎤 Listening...");
     } catch (error) {
       console.error("❌ Speak error:", error);
-    } finally {
-      // Brief pause before listening again
-      setTimeout(() => {
-        this.isSpeaking = false;
-        this.lastSpeechTime = Date.now(); // Reset timer for new speech detection
-        this.audioBuffer = []; // Clear any audio that came during speaking
-        console.log("🎤 Listening...");
-      }, 300);
+      this.isSpeaking = false;
+      this.lastSpeechTime = Date.now();
+      this.audioBuffer = [];
+      console.log("🎤 Listening...");
     }
   }
 
@@ -693,7 +687,7 @@ If caller says any of: "speak to someone", "real person", "human", "transfer", "
             content: this.transcript.map(t => `${t.role}: ${t.content}`).join("\n"),
           },
         ],
-        max_tokens: 100,
+        max_completion_tokens: 100,
       });
       return response.choices[0].message.content;
     } catch (error) {

@@ -674,7 +674,7 @@ If caller says any of: "speak to someone", "real person", "human", "transfer", "
   async cleanup() {
     if (this.cleanedUp) return;
     this.cleanedUp = true;
-    console.log("🧹 Cleaning up call...");
+    console.log("🧹 Cleaning up call:", this.callSid);
 
     if (this.silenceTimer) {
       clearInterval(this.silenceTimer);
@@ -685,33 +685,41 @@ If caller says any of: "speak to someone", "real person", "human", "transfer", "
     }
 
     const callDuration = Math.round((Date.now() - this.callStartTime) / 1000);
-    console.log(`📞 Call duration: ${callDuration}s, Turns: ${this.turnCount}`);
+    console.log(`📞 Call duration: ${callDuration}s, Turns: ${this.turnCount}, Transcript entries: ${this.transcript.length}`);
 
+    // Always save call log, even if no transcript
+    try {
+      await this.prisma.callLog.upsert({
+        where: { callSid: this.callSid },
+        update: {
+          handledByAI: true,
+          transferredToHuman: this.transferredToHuman,
+          duration: callDuration,
+          organizationId: this.organization?.id,
+          status: "COMPLETED",
+        },
+        create: {
+          callSid: this.callSid,
+          direction: "INBOUND",
+          fromNumber: this.callerInfo.phone || "Unknown",
+          toNumber: this.toNumber || "Unknown",
+          status: "COMPLETED",
+          duration: callDuration,
+          handledByAI: true,
+          transferredToHuman: this.transferredToHuman,
+          organizationId: this.organization?.id,
+        },
+      });
+      console.log("✅ Call log saved");
+    } catch (err) {
+      console.error("❌ Call log save error:", err.message);
+    }
+
+    // Save transcript if we have conversation data
     if (this.transcript.length > 0) {
       try {
         const summary = await this.generateSummary();
         console.log("📝 Summary:", summary);
-
-        await this.prisma.callLog.upsert({
-          where: { callSid: this.callSid },
-          update: {
-            handledByAI: true,
-            transferredToHuman: this.transferredToHuman,
-            duration: callDuration,
-            organizationId: this.organization?.id,
-          },
-          create: {
-            callSid: this.callSid,
-            direction: "INBOUND",
-            fromNumber: this.callerInfo.phone || "Unknown",
-            toNumber: this.toNumber || "Unknown",
-            status: "COMPLETED",
-            duration: callDuration,
-            handledByAI: true,
-            transferredToHuman: this.transferredToHuman,
-            organizationId: this.organization?.id,
-          },
-        });
 
         await this.prisma.transcript.create({
           data: {
@@ -722,7 +730,9 @@ If caller says any of: "speak to someone", "real person", "human", "transfer", "
             organizationId: this.organization?.id,
           },
         });
+        console.log("✅ Transcript saved");
 
+        // Create lead if we have caller info
         if (this.callerInfo.name || this.callerInfo.reason) {
           await this.prisma.lead.create({
             data: {
@@ -744,11 +754,11 @@ If caller says any of: "speak to someone", "real person", "human", "transfer", "
           });
           console.log("✅ Lead saved:", this.callerInfo.name || "Unknown");
         }
-
-        console.log("✅ Call data saved");
       } catch (err) {
-        console.error("❌ Save error:", err.message);
+        console.error("❌ Transcript/Lead save error:", err.message, err.stack);
       }
+    } else {
+      console.log("⚠️ No transcript to save (call may have ended before conversation)");
     }
 
     console.log("🧹 Cleanup complete");

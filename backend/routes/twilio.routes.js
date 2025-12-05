@@ -90,6 +90,29 @@ router.post(
       console.log("📞 Routing to:", { orgId: org?.id, aiEnabled, clientIdentity });
 
       if (aiEnabled) {
+        const callSid = req.body.CallSid;
+
+        // Start call recording via API (runs parallel to the call)
+        if (callSid) {
+          const twilioClient = twilio(
+            process.env.TWILIO_ACCOUNT_SID,
+            process.env.TWILIO_AUTH_TOKEN
+          );
+
+          twilioClient.calls(callSid)
+            .recordings.create({
+              recordingStatusCallback: `${process.env.PUBLIC_BASE_URL}/twilio/recording/callback`,
+              recordingStatusCallbackEvent: ["completed"],
+              recordingChannels: "dual",
+            })
+            .then((recording) => {
+              console.log("🎙️ Recording started:", recording.sid);
+            })
+            .catch((err) => {
+              console.error("⚠️ Recording start error:", err.message);
+            });
+        }
+
         twiml.say(
           { voice: "Polly.Amy" },
           "Please hold while I connect you to our assistant."
@@ -281,13 +304,26 @@ router.post(
   "/recording/callback",
   validateTwilioWebhookFlexible,
   async (req, res) => {
-    const { CallSid, RecordingUrl, RecordingDuration, RecordingSid } = req.body;
-    console.log("🎧 Recording:", { CallSid, RecordingUrl });
+    const { CallSid, RecordingUrl, RecordingDuration, RecordingSid, From, To } = req.body;
+    console.log("🎧 Recording callback:", { CallSid, RecordingUrl, RecordingSid });
 
     try {
-      await prisma.callLog.update({
+      // Use upsert to handle case where call log might not exist yet
+      await prisma.callLog.upsert({
         where: { callSid: CallSid },
-        data: {
+        update: {
+          recordingUrl: RecordingUrl,
+          recordingSid: RecordingSid,
+          recordingDuration: RecordingDuration
+            ? parseInt(RecordingDuration)
+            : null,
+        },
+        create: {
+          callSid: CallSid,
+          direction: "INBOUND",
+          fromNumber: From || "Unknown",
+          toNumber: To || "Unknown",
+          status: "COMPLETED",
           recordingUrl: RecordingUrl,
           recordingSid: RecordingSid,
           recordingDuration: RecordingDuration
@@ -295,6 +331,7 @@ router.post(
             : null,
         },
       });
+      console.log("✅ Recording saved to DB");
     } catch (err) {
       console.error("❌ Recording callback DB error:", err);
     }

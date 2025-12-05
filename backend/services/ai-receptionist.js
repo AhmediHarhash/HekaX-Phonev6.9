@@ -84,13 +84,21 @@ class AIReceptionist {
     this.SILENCE_THRESHOLD_MS = 1200; // 1.2 seconds - wait for caller to finish
     this.MIN_SPEECH_DURATION_MS = 300; // Minimum speech duration to process
     this.MIN_AUDIO_LENGTH = 1600; // Minimum ~0.1 seconds of audio
-    this.SPEECH_THRESHOLD = 25; // Audio level threshold (balanced for phone quality)
+
+    // DYNAMIC speech threshold - will be calibrated based on background noise
+    this.SPEECH_THRESHOLD = 50; // Starting threshold, will adjust dynamically
+    this.baselineNoiseLevel = 0; // Calibrated background noise level
+    this.calibrationSamples = []; // Samples for calibration
+    this.isCalibrated = false;
+    this.CALIBRATION_FRAMES = 20; // ~0.4 seconds to calibrate
+    this.SPEECH_MARGIN = 15; // How much above baseline to consider speech
+
     this.SPEECH_CONFIRM_CHUNKS = 3; // Need 3 consecutive chunks above threshold to start
 
     // Speech detection state
     this.consecutiveSpeechChunks = 0;
     this.consecutiveSilenceChunks = 0;
-    this.SILENCE_CONFIRM_CHUNKS = 40; // ~0.8 seconds of silence to confirm end of speech
+    this.SILENCE_CONFIRM_CHUNKS = 25; // ~0.5 seconds of silence to confirm end of speech (was 40)
     this.inSpeechSegment = false; // Track if we're currently in a speech segment
 
     // Audio level tracking for debugging
@@ -194,6 +202,23 @@ class AIReceptionist {
 
     // Detect speech level
     const audioLevel = this.getAudioLevel(audioData);
+
+    // Dynamic calibration: learn the baseline noise level from first few frames
+    if (!this.isCalibrated) {
+      this.calibrationSamples.push(audioLevel);
+      if (this.calibrationSamples.length >= this.CALIBRATION_FRAMES) {
+        // Use the median of samples as baseline (more robust than average)
+        const sorted = [...this.calibrationSamples].sort((a, b) => a - b);
+        this.baselineNoiseLevel = sorted[Math.floor(sorted.length / 2)];
+        // Set threshold above baseline
+        this.SPEECH_THRESHOLD = this.baselineNoiseLevel + this.SPEECH_MARGIN;
+        this.isCalibrated = true;
+        console.log(`🎚️ Calibrated: baseline=${this.baselineNoiseLevel}, threshold=${this.SPEECH_THRESHOLD}`);
+      }
+      return; // Don't process during calibration
+    }
+
+    // Speech is when level is significantly above baseline
     const isSpeech = audioLevel > this.SPEECH_THRESHOLD;
 
     // Track recent levels for debugging
@@ -209,8 +234,7 @@ class AIReceptionist {
         if (!this.inSpeechSegment) {
           this.inSpeechSegment = true;
           this.speechStartTime = Date.now();
-          const avgLevel = Math.round(this.recentLevels.reduce((a,b) => a+b, 0) / this.recentLevels.length);
-          console.log(`🗣️ Caller started speaking (level=${audioLevel}, avg=${avgLevel})`);
+          console.log(`🗣️ Caller started speaking (level=${audioLevel}, threshold=${this.SPEECH_THRESHOLD})`);
         }
         this.lastSpeechTime = Date.now();
         this.hasSpeechInBuffer = true;
@@ -221,19 +245,15 @@ class AIReceptionist {
 
       // Only mark end of speech after sustained silence
       if (this.inSpeechSegment && this.consecutiveSilenceChunks >= this.SILENCE_CONFIRM_CHUNKS) {
-        const avgLevel = Math.round(this.recentLevels.reduce((a,b) => a+b, 0) / this.recentLevels.length);
-        console.log(`🔇 Caller stopped speaking (level=${audioLevel}, avg=${avgLevel})`);
+        console.log(`🔇 Caller stopped speaking (silentChunks=${this.consecutiveSilenceChunks}, level=${audioLevel})`);
         this.inSpeechSegment = false;
       }
     }
 
-    // Log more frequently for debugging
+    // Log every 100 chunks for debugging
     if (this.audioBuffer.length % 100 === 0) {
       const silenceMs = Date.now() - this.lastSpeechTime;
-      const avgLevel = this.recentLevels.length > 0
-        ? Math.round(this.recentLevels.reduce((a,b) => a+b, 0) / this.recentLevels.length)
-        : 0;
-      console.log(`🎤 buffer=${this.audioBuffer.length}, level=${audioLevel}, avg=${avgLevel}, inSpeech=${this.inSpeechSegment}, hasSpeech=${this.hasSpeechInBuffer}, silence=${Math.round(silenceMs/1000)}s`);
+      console.log(`🎤 buffer=${this.audioBuffer.length}, level=${audioLevel}, thresh=${this.SPEECH_THRESHOLD}, inSpeech=${this.inSpeechSegment}, silence=${(silenceMs/1000).toFixed(1)}s`);
     }
   }
 
@@ -420,7 +440,19 @@ Text: "${userText}"`,
         response_format: { type: "json_object" },
       });
 
-      const extracted = JSON.parse(response.choices[0].message.content);
+      let extracted;
+      const rawContent = response.choices[0].message.content;
+
+      try {
+        extracted = JSON.parse(rawContent);
+      } catch (parseError) {
+        console.warn("⚠️ JSON parse failed, raw:", rawContent?.substring(0, 100));
+        // Fallback: check for human transfer keywords manually
+        const lowerText = userText.toLowerCase();
+        const humanKeywords = ["human", "person", "agent", "representative", "transfer", "speak to someone", "real person"];
+        const wantsHuman = humanKeywords.some(kw => lowerText.includes(kw));
+        extracted = { wantsHumanAgent: wantsHuman };
+      }
 
       for (const key of Object.keys(this.callerInfo)) {
         if (extracted[key] !== undefined && extracted[key] !== null && extracted[key] !== "") {
@@ -430,6 +462,7 @@ Text: "${userText}"`,
 
       if (extracted.wantsHumanAgent === true) {
         this.wantsHumanTransfer = true;
+        console.log("🙋 Caller wants human transfer");
       }
 
       if (this.callerInfo.name) {
@@ -437,6 +470,12 @@ Text: "${userText}"`,
       }
     } catch (error) {
       console.error("⚠️ Extraction error:", error.message);
+      // Even on total failure, check for human transfer keywords
+      const lowerText = userText.toLowerCase();
+      if (lowerText.includes("human") || lowerText.includes("person") || lowerText.includes("transfer")) {
+        this.wantsHumanTransfer = true;
+        console.log("🙋 Caller wants human transfer (fallback detection)");
+      }
     }
   }
 

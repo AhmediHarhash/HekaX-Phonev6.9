@@ -456,12 +456,20 @@ class AIReceptionist {
 
       const callerId = this.toNumber || process.env.TWILIO_NUMBER;
 
-      // Simple direct dial to web client - this is what worked in v5
+      // Use organization-based client identity (matches token generation)
+      // Format: {organizationId}-web
+      const clientIdentity = this.organization?.id
+        ? `${this.organization.id}-web`
+        : "default-web";
+
+      console.log("📞 Dialing client:", clientIdentity);
+
+      // Simple direct dial to web client
       await this.twilioClient.calls(this.callSid).update({
-        twiml: `<Response><Dial callerId="${callerId}"><Client>ahmed-web</Client></Dial></Response>`,
+        twiml: `<Response><Dial callerId="${callerId}"><Client>${clientIdentity}</Client></Dial></Response>`,
       });
 
-      console.log("✅ Transfer initiated to ahmed-web");
+      console.log("✅ Transfer initiated to", clientIdentity);
     } catch (err) {
       console.error("❌ Transfer error:", err.message);
     }

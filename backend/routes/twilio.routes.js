@@ -82,10 +82,10 @@ router.post(
         process.env.AI_RECEPTIONIST_ENABLED === "true";
 
       // Determine client identity for this organization
-      const primaryMember = org?.memberships?.[0];
-      const clientIdentity = primaryMember?.user?.id
-        ? `${primaryMember.user.id}-${Date.now()}`
-        : "fallback-web";
+      // Format: {organizationId}-web (matches token generation and AI transfer)
+      const clientIdentity = org?.id
+        ? `${org.id}-web`
+        : "default-web";
 
       console.log("📞 Routing to:", { orgId: org?.id, aiEnabled, clientIdentity });
 
@@ -350,7 +350,9 @@ router.post(
       timeout: 30,
       action: `${process.env.PUBLIC_BASE_URL}/twilio/transfer/status`,
     });
-    dial.client("web-user");
+    // Note: This endpoint is used as fallback - ideally transfer should use org-specific identity
+    // The AI receptionist handles this dynamically now
+    dial.client("default-web");
 
     // Fallback if no one answers
     twiml.say(

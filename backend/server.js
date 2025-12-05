@@ -231,7 +231,9 @@ const { authMiddleware } = require("./middleware/auth.middleware");
 app.get("/token", authMiddleware, async (req, res) => {
   try {
     const twilioService = require("./services/twilio.service");
-    const identity = `${req.user.id}-${Date.now()}`;
+    // Use stable identity: organizationId-web (no timestamp!)
+    // This allows transfers to find the registered client
+    const identity = `${req.organizationId}-web`;
 
     const result = await twilioService.generateAccessToken(
       req.organizationId,
@@ -257,7 +259,8 @@ app.get("/token", authMiddleware, async (req, res) => {
       return res.status(500).json({ error: "Missing Twilio config" });
     }
 
-    const identity = req.query.identity || "web-user";
+    // Fallback: use organizationId-web or default
+    const identity = req.organizationId ? `${req.organizationId}-web` : "default-web";
 
     const token = new AccessToken(
       TWILIO_ACCOUNT_SID,

@@ -1,15 +1,12 @@
 // ============================================================================
 // HEKAX Phone - AI Receptionist Service
-// Enterprise-Grade Voice AI with Natural Conversation Flow
+// Enterprise-Grade Voice AI with Deepgram Real-Time STT
 // ============================================================================
 
 require("dotenv").config();
 const OpenAI = require("openai");
 const WebSocket = require("ws");
 const twilio = require("twilio");
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
 
 // ============================================================================
 // VOICE OPTIONS (OpenAI TTS)
@@ -29,6 +26,24 @@ const DEFAULT_VOICE = "nova";
 // HOLD MUSIC URL (royalty-free)
 // ============================================================================
 const HOLD_MUSIC_URL = "http://com.twilio.sounds.music.s3.amazonaws.com/MARKOVICHAMP-B8.mp3";
+
+// ============================================================================
+// DEEPGRAM CONFIGURATION
+// ============================================================================
+const DEEPGRAM_URL = "wss://api.deepgram.com/v1/listen";
+const DEEPGRAM_OPTIONS = {
+  model: "nova-2",
+  language: "en-US",
+  smart_format: true,
+  encoding: "mulaw",
+  sample_rate: 8000,
+  channels: 1,
+  punctuate: true,
+  interim_results: true,
+  utterance_end_ms: 1000,
+  vad_events: true,
+  endpointing: 300,
+};
 
 class AIReceptionist {
   constructor({
@@ -71,38 +86,12 @@ class AIReceptionist {
     this.callStartTime = Date.now();
 
     // =========================================================================
-    // AUDIO BUFFERING - Enterprise Settings
+    // DEEPGRAM STREAMING STT
     // =========================================================================
-    this.audioBuffer = [];
-    this.silenceTimer = null;
-    this.lastAudioTime = Date.now();
-    this.lastSpeechTime = Date.now();
-    this.speechStartTime = null; // When caller started current utterance
-    this.hasSpeechInBuffer = false; // Whether buffer contains any speech
-
-    // Tuned thresholds for natural conversation
-    this.SILENCE_THRESHOLD_MS = 1200; // 1.2 seconds - wait for caller to finish
-    this.MIN_SPEECH_DURATION_MS = 300; // Minimum speech duration to process
-    this.MIN_AUDIO_LENGTH = 1600; // Minimum ~0.1 seconds of audio
-
-    // DYNAMIC speech threshold - will be calibrated based on background noise
-    this.SPEECH_THRESHOLD = 50; // Starting threshold, will adjust dynamically
-    this.baselineNoiseLevel = 0; // Calibrated background noise level
-    this.calibrationSamples = []; // Samples for calibration
-    this.isCalibrated = false;
-    this.CALIBRATION_FRAMES = 20; // ~0.4 seconds to calibrate
-    this.SPEECH_MARGIN = 15; // How much above baseline to consider speech
-
-    this.SPEECH_CONFIRM_CHUNKS = 3; // Need 3 consecutive chunks above threshold to start
-
-    // Speech detection state
-    this.consecutiveSpeechChunks = 0;
-    this.consecutiveSilenceChunks = 0;
-    this.SILENCE_CONFIRM_CHUNKS = 25; // ~0.5 seconds of silence to confirm end of speech (was 40)
-    this.inSpeechSegment = false; // Track if we're currently in a speech segment
-
-    // Audio level tracking for debugging
-    this.recentLevels = [];
+    this.deepgramWs = null;
+    this.deepgramReady = false;
+    this.currentUtterance = ""; // Accumulates interim results
+    this.lastFinalTranscript = ""; // Last finalized transcript
 
     // =========================================================================
     // CONVERSATION TRACKING
@@ -139,15 +128,16 @@ class AIReceptionist {
   // ===========================================================================
   async initialize() {
     console.log("🤖 Initializing AI Receptionist for:", this.orgName);
-    console.log("🎤 Voice:", this.voiceId, "| Silence threshold:", this.SILENCE_THRESHOLD_MS, "ms");
+    console.log("🎤 Voice:", this.voiceId, "| Using Deepgram streaming STT");
 
     try {
-      this.startSilenceDetection();
+      // Connect to Deepgram streaming STT
+      await this.connectToDeepgram();
 
       // Small delay for audio stream to stabilize, then greet
       setTimeout(async () => {
         await this.speak(this.greeting);
-      }, 1500);
+      }, 1000);
     } catch (error) {
       console.error("❌ Initialization error:", error.message);
       await this.speak("Thank you for calling. Please hold.");
@@ -155,187 +145,155 @@ class AIReceptionist {
   }
 
   // ===========================================================================
-  // SMART SILENCE DETECTION
-  // Waits for caller to completely finish speaking
+  // DEEPGRAM STREAMING CONNECTION
   // ===========================================================================
-  startSilenceDetection() {
-    this.silenceTimer = setInterval(async () => {
-      const timeSinceLastSpeech = Date.now() - this.lastSpeechTime;
-      const hasAudio = this.audioBuffer.length > 0;
-      const speechDuration = this.speechStartTime ? (this.lastSpeechTime - this.speechStartTime) : 0;
-
-      // Debug log every 2 seconds
-      if (Date.now() % 2000 < 250) {
-        console.log(`🔍 buffer=${this.audioBuffer.length}, silence=${Math.round(timeSinceLastSpeech/1000)}s, hasSpeech=${this.hasSpeechInBuffer}, inSpeech=${this.inSpeechSegment}, speaking=${this.isSpeaking}, processing=${this.isProcessing}`);
+  async connectToDeepgram() {
+    return new Promise((resolve, reject) => {
+      const apiKey = process.env.DEEPGRAM_API_KEY;
+      if (!apiKey) {
+        console.error("❌ DEEPGRAM_API_KEY not found in environment");
+        reject(new Error("Missing Deepgram API key"));
+        return;
       }
 
-      // Process when:
-      // 1. We have audio in buffer
-      // 2. We detected speech at some point (hasSpeechInBuffer)
-      // 3. Enough silence has passed (caller stopped talking)
-      // 4. Not currently in a speech segment
-      // 5. Not already processing or speaking
-      if (
-        hasAudio &&
-        this.hasSpeechInBuffer &&
-        timeSinceLastSpeech > this.SILENCE_THRESHOLD_MS &&
-        !this.inSpeechSegment &&
-        !this.isProcessing &&
-        !this.isSpeaking
-      ) {
-        console.log(`🎯 Processing: ${this.audioBuffer.length} chunks, ${Math.round(speechDuration/1000)}s speech, ${Math.round(timeSinceLastSpeech/1000)}s silence`);
-        await this.processBufferedAudio();
-      }
-    }, 150); // Check frequently for responsiveness
-  }
+      // Build URL with query params
+      const params = new URLSearchParams(DEEPGRAM_OPTIONS).toString();
+      const url = `${DEEPGRAM_URL}?${params}`;
 
-  // ===========================================================================
-  // AUDIO HANDLING WITH SPEECH DETECTION
-  // ===========================================================================
-  async handleAudio(payload) {
-    if (this.transferredToHuman) return;
-    if (this.isSpeaking) return;
+      console.log("🎙️ Connecting to Deepgram...");
 
-    const audioData = Buffer.from(payload, "base64");
-    this.audioBuffer.push(audioData);
-    this.lastAudioTime = Date.now();
+      this.deepgramWs = new WebSocket(url, {
+        headers: {
+          Authorization: `Token ${apiKey}`,
+        },
+      });
 
-    // Detect speech level
-    const audioLevel = this.getAudioLevel(audioData);
+      this.deepgramWs.on("open", () => {
+        console.log("✅ Deepgram connected");
+        this.deepgramReady = true;
+        resolve();
+      });
 
-    // Dynamic calibration: learn the baseline noise level from first few frames
-    if (!this.isCalibrated) {
-      this.calibrationSamples.push(audioLevel);
-      if (this.calibrationSamples.length >= this.CALIBRATION_FRAMES) {
-        // Use the median of samples as baseline (more robust than average)
-        const sorted = [...this.calibrationSamples].sort((a, b) => a - b);
-        this.baselineNoiseLevel = sorted[Math.floor(sorted.length / 2)];
-        // Set threshold above baseline
-        this.SPEECH_THRESHOLD = this.baselineNoiseLevel + this.SPEECH_MARGIN;
-        this.isCalibrated = true;
-        console.log(`🎚️ Calibrated: baseline=${this.baselineNoiseLevel}, threshold=${this.SPEECH_THRESHOLD}`);
-      }
-      return; // Don't process during calibration
-    }
+      this.deepgramWs.on("message", (data) => {
+        this.handleDeepgramMessage(data);
+      });
 
-    // Speech is when level is significantly above baseline
-    const isSpeech = audioLevel > this.SPEECH_THRESHOLD;
+      this.deepgramWs.on("error", (error) => {
+        console.error("❌ Deepgram error:", error.message);
+        this.deepgramReady = false;
+      });
 
-    // Track recent levels for debugging
-    this.recentLevels.push(audioLevel);
-    if (this.recentLevels.length > 50) this.recentLevels.shift();
+      this.deepgramWs.on("close", (code, reason) => {
+        console.log("📴 Deepgram disconnected:", code, reason?.toString());
+        this.deepgramReady = false;
+      });
 
-    if (isSpeech) {
-      this.consecutiveSpeechChunks++;
-      this.consecutiveSilenceChunks = 0;
-
-      // Confirm speech after consecutive chunks (debounce)
-      if (this.consecutiveSpeechChunks >= this.SPEECH_CONFIRM_CHUNKS) {
-        if (!this.inSpeechSegment) {
-          this.inSpeechSegment = true;
-          this.speechStartTime = Date.now();
-          console.log(`🗣️ Caller started speaking (level=${audioLevel}, threshold=${this.SPEECH_THRESHOLD})`);
+      // Timeout for connection
+      setTimeout(() => {
+        if (!this.deepgramReady) {
+          reject(new Error("Deepgram connection timeout"));
         }
-        this.lastSpeechTime = Date.now();
-        this.hasSpeechInBuffer = true;
-      }
-    } else {
-      this.consecutiveSilenceChunks++;
-      this.consecutiveSpeechChunks = 0;
-
-      // Only mark end of speech after sustained silence
-      if (this.inSpeechSegment && this.consecutiveSilenceChunks >= this.SILENCE_CONFIRM_CHUNKS) {
-        console.log(`🔇 Caller stopped speaking (silentChunks=${this.consecutiveSilenceChunks}, level=${audioLevel})`);
-        this.inSpeechSegment = false;
-      }
-    }
-
-    // Log every 100 chunks for debugging
-    if (this.audioBuffer.length % 100 === 0) {
-      const silenceMs = Date.now() - this.lastSpeechTime;
-      console.log(`🎤 buffer=${this.audioBuffer.length}, level=${audioLevel}, thresh=${this.SPEECH_THRESHOLD}, inSpeech=${this.inSpeechSegment}, silence=${(silenceMs/1000).toFixed(1)}s`);
-    }
-  }
-
-  getAudioLevel(audioData) {
-    let sum = 0;
-    for (let i = 0; i < audioData.length; i++) {
-      // Mulaw: center is around 0x7F/0xFF, deviation = sound
-      const sample = audioData[i];
-      const deviation = Math.abs(sample - 0x7F);
-      sum += deviation;
-    }
-    return Math.round(sum / audioData.length);
+      }, 5000);
+    });
   }
 
   // ===========================================================================
-  // AUDIO PROCESSING
+  // HANDLE DEEPGRAM MESSAGES (Real-time transcripts)
   // ===========================================================================
-  async processBufferedAudio() {
-    if (this.audioBuffer.length === 0) return;
-    if (this.isProcessing) return;
+  handleDeepgramMessage(data) {
+    try {
+      const response = JSON.parse(data.toString());
 
-    const combinedAudio = Buffer.concat(this.audioBuffer);
-    const chunkCount = this.audioBuffer.length;
-    const durationSec = (chunkCount * 20) / 1000; // Each chunk ~20ms
+      // Handle speech started event
+      if (response.type === "SpeechStarted") {
+        console.log("🗣️ Caller started speaking");
+        return;
+      }
 
-    console.log(`🎯 Processing audio: ${chunkCount} chunks, ${combinedAudio.length} bytes, ~${durationSec.toFixed(1)}s`);
+      // Handle utterance end event (Deepgram detected end of speech)
+      if (response.type === "UtteranceEnd") {
+        console.log("🔇 Utterance end detected");
+        // Process accumulated utterance if we have one
+        if (this.currentUtterance.trim()) {
+          this.handleFinalTranscript(this.currentUtterance.trim());
+          this.currentUtterance = "";
+        }
+        return;
+      }
 
-    // Reset buffer state
-    this.audioBuffer = [];
-    this.hasSpeechInBuffer = false;
-    this.speechStartTime = null;
-    this.consecutiveSpeechChunks = 0;
-    this.consecutiveSilenceChunks = 0;
+      // Handle transcript results
+      if (response.channel?.alternatives?.[0]) {
+        const alt = response.channel.alternatives[0];
+        const transcript = alt.transcript || "";
+        const isFinal = response.is_final;
+        const speechFinal = response.speech_final;
 
-    if (combinedAudio.length < this.MIN_AUDIO_LENGTH) {
-      console.log("⚠️ Audio too short, skipping");
+        if (!transcript) return;
+
+        if (isFinal) {
+          // Final result for this segment
+          this.currentUtterance += (this.currentUtterance ? " " : "") + transcript;
+          console.log(`📝 Interim: "${this.currentUtterance}"`);
+
+          // If speech_final is true, the speaker has finished talking
+          if (speechFinal) {
+            console.log(`✅ Final: "${this.currentUtterance}"`);
+            this.handleFinalTranscript(this.currentUtterance.trim());
+            this.currentUtterance = "";
+          }
+        }
+      }
+    } catch (error) {
+      console.error("❌ Deepgram parse error:", error.message);
+    }
+  }
+
+  // ===========================================================================
+  // HANDLE FINAL TRANSCRIPT (Trigger AI response)
+  // ===========================================================================
+  async handleFinalTranscript(text) {
+    if (!text || text.length < 2) {
+      console.log("⚠️ Empty transcript, ignoring");
       return;
     }
 
-    this.isProcessing = true;
-    console.log(`🎤 Processing ${chunkCount} chunks (${combinedAudio.length} bytes)`);
-
-    try {
-      const wavBuffer = this.mulawToWav(combinedAudio);
-      const tempFile = path.join(os.tmpdir(), `hekax-${Date.now()}.wav`);
-      fs.writeFileSync(tempFile, wavBuffer);
-
-      console.log("🎯 Transcribing with Whisper...");
-      const transcript = await this.transcribeAudio(tempFile);
-
-      try { fs.unlinkSync(tempFile); } catch (e) {}
-
-      if (transcript && transcript.trim().length > 1) {
-        console.log("🎤 Caller:", transcript);
-        this.transcript.push({
-          role: "user",
-          content: transcript,
-          timestamp: new Date().toISOString(),
-        });
-        await this.processUserInput(transcript);
-      } else {
-        console.log("⚠️ Empty transcript, might be noise");
-      }
-    } catch (error) {
-      console.error("❌ Processing error:", error.message);
-    } finally {
-      this.isProcessing = false;
+    // Don't process if we're speaking or already processing
+    if (this.isSpeaking) {
+      console.log("⚠️ Still speaking, queuing transcript");
+      return;
     }
+
+    if (this.isProcessing) {
+      console.log("⚠️ Already processing, queuing transcript");
+      return;
+    }
+
+    if (this.transferredToHuman) {
+      console.log("⚠️ Transferred to human, ignoring");
+      return;
+    }
+
+    console.log("🎤 Caller:", text);
+    this.transcript.push({
+      role: "user",
+      content: text,
+      timestamp: new Date().toISOString(),
+    });
+
+    await this.processUserInput(text);
   }
 
-  async transcribeAudio(filePath) {
-    try {
-      const response = await this.openai.audio.transcriptions.create({
-        file: fs.createReadStream(filePath),
-        model: "whisper-1",
-        language: "en",
-        response_format: "text",
-      });
-      return response;
-    } catch (error) {
-      console.error("❌ Whisper error:", error.message);
-      return null;
+  // ===========================================================================
+  // AUDIO HANDLING - Send to Deepgram
+  // ===========================================================================
+  handleAudio(payload) {
+    if (this.transferredToHuman) return;
+    if (this.isSpeaking) return;
+
+    // Send raw mulaw audio directly to Deepgram
+    if (this.deepgramReady && this.deepgramWs?.readyState === WebSocket.OPEN) {
+      const audioData = Buffer.from(payload, "base64");
+      this.deepgramWs.send(audioData);
     }
   }
 
@@ -343,26 +301,28 @@ class AIReceptionist {
   // CONVERSATION PROCESSING (JSON-based)
   // ===========================================================================
   async processUserInput(userText) {
+    this.isProcessing = true;
     this.turnCount++;
 
     if (this.turnCount > this.maxTurns) {
       await this.speak("Thank you for your time. I'll make sure your information is passed to our team. Have a great day!");
+      this.isProcessing = false;
       return;
     }
 
     try {
-      // Add user message to history (just the text, not JSON)
+      // Add user message to history
       this.conversationHistory.push({ role: "user", content: userText });
 
       // Generate AI response with JSON format
       console.log("🧠 Generating response...");
       const response = await this.openai.chat.completions.create({
-        model: "gpt-5.1",
+        model: "gpt-4o-mini",
         messages: [
           { role: "system", content: this.getSystemPrompt() },
           ...this.conversationHistory,
         ],
-        max_completion_tokens: 250,
+        max_tokens: 250,
         temperature: 0.7,
         response_format: { type: "json_object" },
       });
@@ -375,7 +335,6 @@ class AIReceptionist {
         aiJson = JSON.parse(rawContent);
       } catch (parseError) {
         console.warn("⚠️ JSON parse failed, using raw as reply:", rawContent?.substring(0, 100));
-        // Fallback: treat raw content as plain reply
         const lowerText = userText.toLowerCase();
         const humanKeywords = ["human", "person", "agent", "representative", "transfer", "speak to someone", "real person"];
         const needsHuman = humanKeywords.some(kw => lowerText.includes(kw));
@@ -396,7 +355,7 @@ class AIReceptionist {
       // Apply extracted slots to callerInfo
       this.applyAIResult(aiJson);
 
-      // Add only the reply to conversation history (not the full JSON)
+      // Add only the reply to conversation history
       this.conversationHistory.push({ role: "assistant", content: reply });
       this.transcript.push({
         role: "assistant",
@@ -414,6 +373,7 @@ class AIReceptionist {
             console.error("❌ Transfer failed:", err.message);
           });
         }, 800);
+        this.isProcessing = false;
         return;
       }
 
@@ -421,6 +381,7 @@ class AIReceptionist {
       if (aiJson.end_call) {
         await this.speak(reply);
         console.log("📞 AI decided to end call");
+        this.isProcessing = false;
         return;
       }
 
@@ -429,6 +390,8 @@ class AIReceptionist {
     } catch (error) {
       console.error("❌ Process error:", error.message);
       await this.speak("I apologize, could you please repeat that?");
+    } finally {
+      this.isProcessing = false;
     }
   }
 
@@ -436,7 +399,6 @@ class AIReceptionist {
   // APPLY AI RESULT TO CALLER INFO
   // ===========================================================================
   applyAIResult(aiJson) {
-    // Map slots to callerInfo
     if (aiJson.slots && typeof aiJson.slots === "object") {
       const slotMapping = {
         name: "name",
@@ -458,19 +420,16 @@ class AIReceptionist {
       }
     }
 
-    // Set urgency if provided
     if (aiJson.urgency && ["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(aiJson.urgency)) {
       this.callerInfo.urgency = aiJson.urgency;
     }
 
-    // Set human transfer flag
     if (aiJson.needs_human === true) {
       this.wantsHumanTransfer = true;
       this.callerInfo.wantsHumanAgent = true;
       console.log("🙋 Caller wants human transfer");
     }
 
-    // Log if we identified the caller
     if (this.callerInfo.name) {
       console.log("📋 Caller identified:", this.callerInfo.name);
     }
@@ -484,9 +443,13 @@ class AIReceptionist {
       console.log("🔁 Transferring to human with hold music...");
       this.transferredToHuman = true;
 
+      // Close Deepgram connection
+      if (this.deepgramWs) {
+        this.deepgramWs.close();
+      }
+
       const callerId = this.toNumber || process.env.TWILIO_NUMBER;
 
-      // Use Play for hold music while connecting
       await this.twilioClient.calls(this.callSid).update({
         twiml: `
           <Response>
@@ -507,7 +470,6 @@ class AIReceptionist {
     }
   }
 
-  // Legacy transfer without music
   async transferToHuman() {
     return this.transferToHumanWithMusic();
   }
@@ -520,30 +482,22 @@ class AIReceptionist {
       console.log("🔊 Speaking:", text.substring(0, 60) + (text.length > 60 ? "..." : ""));
       this.isSpeaking = true;
 
-      // Clear buffer and reset speech detection before speaking
-      this.audioBuffer = [];
-      this.speechStartTime = null;
-      this.hasSpeechInBuffer = false;
-      this.inSpeechSegment = false;
-      this.consecutiveSpeechChunks = 0;
-      this.consecutiveSilenceChunks = 0;
+      // Reset utterance tracking
+      this.currentUtterance = "";
 
       const audioBuffer = await this.textToSpeech(text);
       if (audioBuffer) {
         await this.sendAudioToTwilio(audioBuffer);
       }
 
-      // Reset speaking flag IMMEDIATELY after sending audio
-      // The sendAudioToTwilio function blocks until all audio is sent
+      // Small delay after speaking to let Deepgram settle
+      await new Promise(resolve => setTimeout(resolve, 200));
+
       this.isSpeaking = false;
-      this.lastSpeechTime = Date.now(); // Reset timer for new speech detection
-      this.audioBuffer = []; // Clear any audio that came during speaking
       console.log("🎤 Listening...");
     } catch (error) {
       console.error("❌ Speak error:", error);
       this.isSpeaking = false;
-      this.lastSpeechTime = Date.now();
-      this.audioBuffer = [];
       console.log("🎤 Listening...");
     }
   }
@@ -618,50 +572,6 @@ class AIReceptionist {
     }
   }
 
-  // ===========================================================================
-  // MULAW TO WAV CONVERSION
-  // ===========================================================================
-  mulawToWav(mulawBuffer) {
-    const sampleRate = 8000;
-    const numChannels = 1;
-    const bitsPerSample = 16;
-
-    const pcmSamples = new Int16Array(mulawBuffer.length);
-    for (let i = 0; i < mulawBuffer.length; i++) {
-      pcmSamples[i] = this.mulawDecode(mulawBuffer[i]);
-    }
-
-    const wavHeader = Buffer.alloc(44);
-    const dataSize = pcmSamples.length * 2;
-    const fileSize = dataSize + 36;
-
-    wavHeader.write("RIFF", 0);
-    wavHeader.writeUInt32LE(fileSize, 4);
-    wavHeader.write("WAVE", 8);
-    wavHeader.write("fmt ", 12);
-    wavHeader.writeUInt32LE(16, 16);
-    wavHeader.writeUInt16LE(1, 20);
-    wavHeader.writeUInt16LE(numChannels, 22);
-    wavHeader.writeUInt32LE(sampleRate, 24);
-    wavHeader.writeUInt32LE(sampleRate * numChannels * bitsPerSample / 8, 28);
-    wavHeader.writeUInt16LE(numChannels * bitsPerSample / 8, 32);
-    wavHeader.writeUInt16LE(bitsPerSample, 34);
-    wavHeader.write("data", 36);
-    wavHeader.writeUInt32LE(dataSize, 40);
-
-    const pcmBuffer = Buffer.from(pcmSamples.buffer);
-    return Buffer.concat([wavHeader, pcmBuffer]);
-  }
-
-  mulawDecode(mulawByte) {
-    mulawByte = ~mulawByte & 0xFF;
-    const sign = (mulawByte & 0x80) ? -1 : 1;
-    const exponent = (mulawByte >> 4) & 0x07;
-    const mantissa = mulawByte & 0x0F;
-    let sample = (mantissa << (exponent + 3)) + (1 << (exponent + 3)) - 132;
-    return Math.max(-32768, Math.min(32767, sign * sample));
-  }
-
   handleMark(mark) {
     // TTS mark handling
   }
@@ -732,7 +642,7 @@ IMPORTANT: Only output valid JSON. No explanations, no markdown, just the JSON o
 
     try {
       const response = await this.openai.chat.completions.create({
-        model: "gpt-5-mini",
+        model: "gpt-4o-mini",
         messages: [
           {
             role: "system",
@@ -743,7 +653,7 @@ IMPORTANT: Only output valid JSON. No explanations, no markdown, just the JSON o
             content: this.transcript.map(t => `${t.role}: ${t.content}`).join("\n"),
           },
         ],
-        max_completion_tokens: 100,
+        max_tokens: 100,
       });
       return response.choices[0].message.content;
     } catch (error) {
@@ -756,18 +666,21 @@ IMPORTANT: Only output valid JSON. No explanations, no markdown, just the JSON o
     this.cleanedUp = true;
     console.log("🧹 Cleaning up call:", this.callSid);
 
-    if (this.silenceTimer) {
-      clearInterval(this.silenceTimer);
-    }
-
-    if (this.audioBuffer.length > 0 && !this.isProcessing && this.hasSpeechInBuffer) {
-      await this.processBufferedAudio();
+    // Close Deepgram connection
+    if (this.deepgramWs) {
+      try {
+        // Send close message to Deepgram
+        this.deepgramWs.send(JSON.stringify({ type: "CloseStream" }));
+        this.deepgramWs.close();
+      } catch (e) {
+        // Ignore close errors
+      }
     }
 
     const callDuration = Math.round((Date.now() - this.callStartTime) / 1000);
     console.log(`📞 Call duration: ${callDuration}s, Turns: ${this.turnCount}, Transcript entries: ${this.transcript.length}`);
 
-    // Always save call log, even if no transcript
+    // Save call log
     try {
       await this.prisma.callLog.upsert({
         where: { callSid: this.callSid },
@@ -795,7 +708,7 @@ IMPORTANT: Only output valid JSON. No explanations, no markdown, just the JSON o
       console.error("❌ Call log save error:", err.message);
     }
 
-    // Save transcript if we have conversation data
+    // Save transcript
     if (this.transcript.length > 0) {
       try {
         const summary = await this.generateSummary();
@@ -838,7 +751,7 @@ IMPORTANT: Only output valid JSON. No explanations, no markdown, just the JSON o
         console.error("❌ Transcript/Lead save error:", err.message, err.stack);
       }
     } else {
-      console.log("⚠️ No transcript to save (call may have ended before conversation)");
+      console.log("⚠️ No transcript to save");
     }
 
     console.log("🧹 Cleanup complete");

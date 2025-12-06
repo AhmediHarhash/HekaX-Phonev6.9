@@ -309,7 +309,7 @@ export function SettingsPage() {
         >
           {message.type === 'success' ? <Check size={18} /> : <AlertCircle size={18} />}
           {message.text}
-          <button onClick={() => setMessage(null)} className="ml-auto hover:opacity-70">
+          <button onClick={() => setMessage(null)} className="ml-auto hover:opacity-70" aria-label="Dismiss message">
             <X size={16} />
           </button>
         </div>
@@ -463,6 +463,7 @@ export function SettingsPage() {
                           playVoicePreview(voice.id);
                         }}
                         disabled={loadingVoice === voice.id}
+                        aria-label={loadingVoice === voice.id ? `Loading ${voice.name} preview` : playingVoice === voice.id ? `Stop ${voice.name} preview` : `Play ${voice.name} preview`}
                         className={`
                           w-8 h-8 rounded-full flex items-center justify-center transition-all
                           ${playingVoice === voice.id
@@ -779,14 +780,14 @@ function IntegrationsTab({ setMessage }: { setMessage: (msg: { type: 'success' |
                     <button
                       onClick={() => {}}
                       className="p-2 rounded-lg bg-slate-700/50 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
-                      title="Settings"
+                      aria-label={`${info?.name || integration.provider} settings`}
                     >
                       <Settings2 size={18} />
                     </button>
                     <button
                       onClick={() => disconnectCRM(integration.id, info?.name || integration.provider)}
                       className="p-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors"
-                      title="Disconnect"
+                      aria-label={`Disconnect ${info?.name || integration.provider}`}
                     >
                       <Trash2 size={18} />
                     </button>
@@ -955,7 +956,7 @@ function IntegrationsTab({ setMessage }: { setMessage: (msg: { type: 'success' |
                     <button
                       onClick={() => disconnectCalendar(integration!.id, provider.name)}
                       className="p-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors"
-                      title="Disconnect"
+                      aria-label={`Disconnect ${provider.name}`}
                     >
                       <Trash2 size={16} />
                     </button>
@@ -1047,6 +1048,7 @@ function IntegrationsTab({ setMessage }: { setMessage: (msg: { type: 'success' |
               <button
                 onClick={() => setShowWebhookModal(false)}
                 className="p-2 rounded-lg hover:bg-slate-700 text-slate-400"
+                aria-label="Close webhook configuration"
               >
                 <X size={20} />
               </button>

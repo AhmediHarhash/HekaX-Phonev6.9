@@ -290,6 +290,11 @@ try {
   const crmRoutes = require("./routes/crm.routes");
   app.use("/api/crm", crmRoutes);
 
+  // Email service routes
+  const emailRoutes = require("./routes/email.routes");
+  app.use("/api/email", emailRoutes);
+  app.use("/api", emailRoutes); // Also mount at /api for /api/test-email
+
   console.log("✅ API routes loaded");
 } catch (err) {
   console.error("❌ API routes error:", err);

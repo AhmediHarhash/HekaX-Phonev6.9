@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { PreferencesProvider } from './context/PreferencesContext';
 import { Sidebar } from './components/layout';
 import { LoadingSpinner, CreateOrgModal } from './components/common';
+import { InstallPrompt, UpdateNotification } from './components/pwa';
 import {
   LoginPage,
   DashboardPage,
@@ -159,6 +160,9 @@ export default function App() {
     <PreferencesProvider>
       <AuthProvider>
         <AppContent />
+        {/* PWA Components */}
+        <InstallPrompt />
+        <UpdateNotification />
       </AuthProvider>
     </PreferencesProvider>
   );

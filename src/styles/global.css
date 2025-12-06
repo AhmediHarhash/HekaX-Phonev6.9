@@ -49,6 +49,37 @@
     @apply transition-all duration-200 hover:border-blue-500/30;
   }
 
+  /* PWA animations */
+  .animate-slide-up {
+    animation: slideUp 0.3s ease-out;
+  }
+
+  .animate-slide-down {
+    animation: slideDown 0.3s ease-out;
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes slideDown {
+    from {
+      opacity: 0;
+      transform: translateY(-20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
   /* Gradient text */
   .gradient-text {
     @apply bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent;

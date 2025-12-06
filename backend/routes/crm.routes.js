@@ -65,6 +65,23 @@ router.get("/connect/:provider", authMiddleware, requireRole(["OWNER", "ADMIN"])
       return res.status(400).json({ error: "Invalid provider" });
     }
 
+    // Check if OAuth credentials are configured
+    const credentialCheck = {
+      hubspot: { id: process.env.HUBSPOT_CLIENT_ID, secret: process.env.HUBSPOT_CLIENT_SECRET },
+      salesforce: { id: process.env.SALESFORCE_CLIENT_ID, secret: process.env.SALESFORCE_CLIENT_SECRET },
+      zoho: { id: process.env.ZOHO_CLIENT_ID, secret: process.env.ZOHO_CLIENT_SECRET },
+      pipedrive: { id: process.env.PIPEDRIVE_CLIENT_ID, secret: process.env.PIPEDRIVE_CLIENT_SECRET },
+    };
+
+    const creds = credentialCheck[provider];
+    if (!creds.id || !creds.secret) {
+      console.log(`⚠️ ${provider} OAuth credentials not configured`);
+      return res.status(400).json({
+        error: `${provider.charAt(0).toUpperCase() + provider.slice(1)} integration is not configured. Please contact support to enable this integration.`,
+        code: "OAUTH_NOT_CONFIGURED"
+      });
+    }
+
     // Generate state token
     const state = crypto.randomBytes(32).toString("hex");
     oauthStates.set(state, {

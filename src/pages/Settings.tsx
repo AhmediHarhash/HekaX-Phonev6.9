@@ -625,8 +625,10 @@ function IntegrationsTab({ setMessage }: { setMessage: (msg: { type: 'success' |
       if (response.authUrl) {
         window.location.href = response.authUrl;
       }
-    } catch (err) {
-      setMessage({ type: 'error', text: `Failed to connect to ${providerId}` });
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      const errorMsg = error?.response?.data?.error || `Failed to connect to ${providerId}`;
+      setMessage({ type: 'error', text: errorMsg });
     } finally {
       setConnecting(null);
     }
@@ -651,8 +653,10 @@ function IntegrationsTab({ setMessage }: { setMessage: (msg: { type: 'success' |
       if (response.authUrl) {
         window.location.href = response.authUrl;
       }
-    } catch (err) {
-      setMessage({ type: 'error', text: `Failed to connect to ${providerId}` });
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      const errorMsg = error?.response?.data?.error || `Failed to connect to ${providerId}`;
+      setMessage({ type: 'error', text: errorMsg });
     } finally {
       setConnecting(null);
     }

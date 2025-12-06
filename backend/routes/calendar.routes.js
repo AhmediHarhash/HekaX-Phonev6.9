@@ -61,6 +61,23 @@ router.get("/connect/:provider", authMiddleware, requireRole(["OWNER", "ADMIN"])
       return res.status(400).json({ error: "Invalid provider" });
     }
 
+    // Check if OAuth credentials are configured
+    const credentialCheck = {
+      google: { id: process.env.GOOGLE_CLIENT_ID, secret: process.env.GOOGLE_CLIENT_SECRET },
+      outlook: { id: process.env.MICROSOFT_CLIENT_ID, secret: process.env.MICROSOFT_CLIENT_SECRET },
+      calendly: { id: process.env.CALENDLY_CLIENT_ID, secret: process.env.CALENDLY_CLIENT_SECRET },
+    };
+
+    const providerNames = { google: "Google Calendar", outlook: "Microsoft Outlook", calendly: "Calendly" };
+    const creds = credentialCheck[provider];
+    if (!creds.id || !creds.secret) {
+      console.log(`⚠️ ${provider} OAuth credentials not configured`);
+      return res.status(400).json({
+        error: `${providerNames[provider]} integration is not configured. Please contact support to enable this integration.`,
+        code: "OAUTH_NOT_CONFIGURED"
+      });
+    }
+
     // Generate state token
     const state = crypto.randomBytes(32).toString("hex");
     oauthStates.set(state, {

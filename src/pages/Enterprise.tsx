@@ -96,8 +96,8 @@ export function EnterprisePage() {
   const [createdKey, setCreatedKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // Check if enterprise
-  const isEnterprise = org?.plan === 'ENTERPRISE';
+  // Check if enterprise (SCALE and ENTERPRISE have enterprise features)
+  const isEnterprise = org?.plan === 'ENTERPRISE' || org?.plan === 'SCALE';
 
   useEffect(() => {
     fetchByoKeys();

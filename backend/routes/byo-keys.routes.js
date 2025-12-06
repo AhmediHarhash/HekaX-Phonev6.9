@@ -61,8 +61,8 @@ router.get("/", authMiddleware, requireRole("OWNER", "ADMIN"), async (req, res) 
       return res.status(404).json({ error: "Organization not found" });
     }
 
-    // Check if enterprise plan
-    const isEnterprise = org.plan === "ENTERPRISE";
+    // Check if enterprise plan (SCALE and ENTERPRISE have enterprise features)
+    const isEnterprise = org.plan === "ENTERPRISE" || org.plan === "SCALE";
 
     res.json({
       enabled: org.byoKeysEnabled,
@@ -109,9 +109,9 @@ router.post("/:provider", authMiddleware, requireRole("OWNER", "ADMIN"), async (
       select: { plan: true },
     });
 
-    if (org.plan !== "ENTERPRISE") {
-      return res.status(403).json({ 
-        error: "BYO Keys is an Enterprise feature. Please upgrade your plan." 
+    if (org.plan !== "ENTERPRISE" && org.plan !== "SCALE") {
+      return res.status(403).json({
+        error: "BYO Keys is an Enterprise feature. Please upgrade your plan."
       });
     }
 
@@ -395,7 +395,7 @@ router.post("/toggle", authMiddleware, requireRole("OWNER", "ADMIN"), async (req
       select: { plan: true },
     });
 
-    if (org.plan !== "ENTERPRISE") {
+    if (org.plan !== "ENTERPRISE" && org.plan !== "SCALE") {
       return res.status(403).json({ error: "BYO Keys is an Enterprise feature" });
     }
 

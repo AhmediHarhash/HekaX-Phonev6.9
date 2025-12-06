@@ -33,8 +33,8 @@ router.get("/", authMiddleware, requireRole("OWNER", "ADMIN"), async (req, res) 
       select: { plan: true },
     });
 
-    if (org.plan !== "ENTERPRISE") {
-      return res.status(403).json({ 
+    if (org.plan !== "ENTERPRISE" && org.plan !== "SCALE") {
+      return res.status(403).json({
         error: "API Keys is an Enterprise feature",
         isEnterprise: false,
       });
@@ -85,7 +85,7 @@ router.post("/", authMiddleware, requireRole("OWNER", "ADMIN"), async (req, res)
       select: { plan: true },
     });
 
-    if (org.plan !== "ENTERPRISE") {
+    if (org.plan !== "ENTERPRISE" && org.plan !== "SCALE") {
       return res.status(403).json({ error: "API Keys is an Enterprise feature" });
     }
 

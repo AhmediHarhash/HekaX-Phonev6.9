@@ -29,6 +29,7 @@ enum Plan {
   STARTER
   BUSINESS_PRO
   SCALE
+  ENTERPRISE
 }
 
 enum UserRole {

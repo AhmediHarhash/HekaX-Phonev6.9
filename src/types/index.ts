@@ -52,7 +52,7 @@ export interface AuthOrg {
 
 export type UserRole = 'OWNER' | 'ADMIN' | 'MANAGER' | 'AGENT' | 'VIEWER';
 export type OrgStatus = 'ACTIVE' | 'SUSPENDED' | 'TRIAL' | 'CANCELLED' | 'PENDING_SETUP';
-export type Plan = 'STARTER' | 'PROFESSIONAL' | 'BUSINESS' | 'ENTERPRISE' | 'WHITE_LABEL';
+export type Plan = 'TRIAL' | 'STARTER' | 'BUSINESS_PRO' | 'SCALE' | 'ENTERPRISE';
 
 export interface BusinessHours {
   [key: string]: { start: string; end: string; enabled: boolean } | undefined;

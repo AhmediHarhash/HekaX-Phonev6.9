@@ -229,27 +229,27 @@ export function EnterprisePage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Non-enterprise view
+  // Non-enterprise view (for STARTER and BUSINESS_PRO plans)
   if (!isEnterprise) {
     return (
       <div>
         <PageHeader
-          title="Enterprise Features"
-          description="Advanced features for enterprise customers"
+          title="Advanced Settings"
+          description="BYO Keys and API access for Scale plans"
         />
 
         <Card className="text-center py-12">
           <Lock size={48} className="mx-auto text-slate-600 mb-4" />
           <h3 className="text-xl font-semibold text-white mb-2">
-            Enterprise Plan Required
+            Scale Plan Required
           </h3>
           <p className="text-slate-400 mb-6 max-w-md mx-auto">
-            BYO Keys and API access are available on the Enterprise plan.
+            BYO Keys and API access are available on the Scale plan.
             Upgrade to use your own API keys and access our platform API.
           </p>
           <Button onClick={() => window.dispatchEvent(new CustomEvent('navigate', { detail: 'billing' }))}>
             <Zap size={18} />
-            Upgrade to Enterprise
+            Upgrade to Scale
           </Button>
         </Card>
       </div>
@@ -259,7 +259,7 @@ export function EnterprisePage() {
   return (
     <div>
       <PageHeader
-        title="Enterprise Settings"
+        title="Advanced Settings"
         description="Manage BYO keys and platform API access"
       />
 

@@ -48,7 +48,7 @@ const navItems: { id: Page; label: string; icon: typeof Phone }[] = [
   { id: 'ai-training', label: 'AI Training', icon: Brain },
   { id: 'team', label: 'Team', icon: Users },
   { id: 'billing', label: 'Billing', icon: CreditCard },
-  { id: 'enterprise', label: 'Enterprise', icon: Key },
+  { id: 'enterprise', label: 'Advanced', icon: Key },
   { id: 'data-management', label: 'Data', icon: Database },
   { id: 'audit-logs', label: 'Audit Logs', icon: Shield },
   { id: 'settings', label: 'Settings', icon: Settings },

@@ -18,6 +18,7 @@ import {
   Palette,
   Moon,
   Sun,
+  Monitor,
   Link,
   ExternalLink,
   Trash2,
@@ -1130,11 +1131,11 @@ function PreferencesTab() {
         <label className="block text-sm font-medium text-slate-300 mb-3">
           Theme
         </label>
-        <div className="flex flex-col sm:flex-row gap-3 max-w-md">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-xl">
           <button
             onClick={() => setTheme('dark')}
             className={`
-              flex-1 p-4 rounded-xl border transition-all
+              p-4 rounded-xl border transition-all
               ${preferences.theme === 'dark'
                 ? 'border-blue-500 bg-blue-500/10 shadow-lg shadow-blue-500/10'
                 : 'border-slate-700 bg-slate-800/50 hover:border-slate-600'
@@ -1150,7 +1151,7 @@ function PreferencesTab() {
           <button
             onClick={() => setTheme('light')}
             className={`
-              flex-1 p-4 rounded-xl border transition-all
+              p-4 rounded-xl border transition-all
               ${preferences.theme === 'light'
                 ? 'border-blue-500 bg-blue-500/10 shadow-lg shadow-blue-500/10'
                 : 'border-slate-700 bg-slate-800/50 hover:border-slate-600'
@@ -1162,6 +1163,22 @@ function PreferencesTab() {
               <span className="text-white font-medium">Light</span>
             </div>
             <p className="text-xs text-slate-500 mt-2">Clean & bright</p>
+          </button>
+          <button
+            onClick={() => setTheme('system')}
+            className={`
+              p-4 rounded-xl border transition-all
+              ${preferences.theme === 'system'
+                ? 'border-blue-500 bg-blue-500/10 shadow-lg shadow-blue-500/10'
+                : 'border-slate-700 bg-slate-800/50 hover:border-slate-600'
+              }
+            `}
+          >
+            <div className="flex items-center justify-center gap-2">
+              <Monitor size={20} className={preferences.theme === 'system' ? 'text-emerald-400' : 'text-slate-400'} />
+              <span className="text-white font-medium">System</span>
+            </div>
+            <p className="text-xs text-slate-500 mt-2">Match your OS</p>
           </button>
         </div>
       </div>

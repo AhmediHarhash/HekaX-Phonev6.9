@@ -5,7 +5,7 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
-type Theme = 'dark' | 'light';
+type Theme = 'dark' | 'light' | 'system';
 
 interface Preferences {
   theme: Theme;
@@ -77,13 +77,43 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   // Apply theme to document
   useEffect(() => {
     const root = document.documentElement;
-    if (preferences.theme === 'light') {
+
+    // Determine effective theme (system follows OS preference)
+    let effectiveTheme = preferences.theme;
+    if (preferences.theme === 'system') {
+      effectiveTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+
+    // Remove all theme classes
+    root.classList.remove('light-theme', 'dark-theme', 'system-theme');
+
+    if (effectiveTheme === 'light') {
       root.classList.add('light-theme');
-      root.classList.remove('dark-theme');
     } else {
       root.classList.add('dark-theme');
-      root.classList.remove('light-theme');
     }
+
+    // Also add system-theme class when using system preference
+    if (preferences.theme === 'system') {
+      root.classList.add('system-theme');
+    }
+
+    // Listen for OS theme changes when using system theme
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = (e: MediaQueryListEvent) => {
+      if (preferences.theme === 'system') {
+        root.classList.remove('light-theme', 'dark-theme');
+        root.classList.add(e.matches ? 'dark-theme' : 'light-theme');
+      }
+    };
+
+    if (preferences.theme === 'system') {
+      mediaQuery.addEventListener('change', handleChange);
+    }
+
+    return () => {
+      mediaQuery.removeEventListener('change', handleChange);
+    };
   }, [preferences.theme]);
 
   // Apply compact mode

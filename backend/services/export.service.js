@@ -357,17 +357,40 @@ function convertToCSV(data, columns) {
 
 /**
  * Get export file path
+ * SECURITY: Validates type and ensures path stays within EXPORT_DIR
  */
 function getExportFilePath(requestId, type) {
-  const extensions = {
-    full_export: "zip",
-    calls_only: "json",
-    leads_only: "json",
-    transcripts_only: "json",
+  // SECURITY: Whitelist valid export types to prevent path traversal
+  const validTypes = {
+    full_export: { prefix: "export", ext: "zip" },
+    calls_only: { prefix: "calls", ext: "json" },
+    leads_only: { prefix: "leads", ext: "json" },
+    transcripts_only: { prefix: "transcripts", ext: "json" },
   };
-  
-  const prefix = type === "full_export" ? "export" : type.replace("_only", "");
-  return path.join(EXPORT_DIR, `${prefix}-${requestId}.${extensions[type] || "json"}`);
+
+  const typeConfig = validTypes[type];
+  if (!typeConfig) {
+    throw new Error(`Invalid export type: ${type}`);
+  }
+
+  // SECURITY: Sanitize requestId to prevent path traversal
+  // Only allow alphanumeric characters and hyphens (UUIDs)
+  const sanitizedId = requestId.replace(/[^a-zA-Z0-9-]/g, "");
+  if (sanitizedId !== requestId || !sanitizedId) {
+    throw new Error("Invalid request ID");
+  }
+
+  const filename = `${typeConfig.prefix}-${sanitizedId}.${typeConfig.ext}`;
+  const filePath = path.join(EXPORT_DIR, filename);
+
+  // SECURITY: Verify resolved path is within EXPORT_DIR (prevent path traversal)
+  const resolvedPath = path.resolve(filePath);
+  const resolvedExportDir = path.resolve(EXPORT_DIR);
+  if (!resolvedPath.startsWith(resolvedExportDir + path.sep)) {
+    throw new Error("Invalid file path");
+  }
+
+  return filePath;
 }
 
 /**

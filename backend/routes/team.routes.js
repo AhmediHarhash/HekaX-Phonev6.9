@@ -161,50 +161,72 @@ router.post("/invite", authMiddleware, requireRole("OWNER", "ADMIN"), async (req
 /**
  * PATCH /api/team/:id
  * Update team member
+ * SECURITY: Uses membership table to properly scope to organization
  */
 router.patch("/:id", authMiddleware, requireRole("OWNER", "ADMIN"), async (req, res) => {
   try {
     const { id } = req.params;
     const { role, status } = req.body;
 
-    // Verify user belongs to same org
-    const user = await prisma.user.findFirst({
+    // SECURITY: Find membership in THIS organization (not legacy organizationId)
+    const membership = await prisma.userOrganization.findFirst({
       where: {
-        id,
+        userId: id,
         organizationId: req.organizationId,
+      },
+      include: {
+        user: {
+          select: { id: true, email: true, name: true, status: true },
+        },
       },
     });
 
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
+    if (!membership) {
+      return res.status(404).json({ error: "User not found in this organization" });
     }
 
     // Prevent changing own role
-    if (user.id === req.user.id && role && role !== user.role) {
+    if (id === req.user.id && role && role !== membership.role) {
       return res.status(400).json({ error: "Cannot change your own role" });
     }
 
     // Prevent demoting owner
-    if (user.role === "OWNER" && role && role !== "OWNER") {
+    if (membership.role === "OWNER" && role && role !== "OWNER") {
       return res.status(400).json({ error: "Cannot demote organization owner" });
     }
 
-    const updated = await prisma.user.update({
-      where: { id },
+    // Validate role
+    const validRoles = ["OWNER", "ADMIN", "MANAGER", "AGENT", "VIEWER"];
+    if (role && !validRoles.includes(role)) {
+      return res.status(400).json({ error: "Invalid role" });
+    }
+
+    // Update the MEMBERSHIP role (not user's global role)
+    const updatedMembership = await prisma.userOrganization.update({
+      where: { id: membership.id },
       data: {
         ...(role && { role }),
-        ...(status && { status }),
-      },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        status: true,
       },
     });
 
-    res.json(updated);
+    // Update user status separately if provided
+    if (status) {
+      await prisma.user.update({
+        where: { id },
+        data: { status },
+      });
+    }
+
+    // Fetch updated user data
+    const updatedUser = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true, email: true, name: true, status: true },
+    });
+
+    res.json({
+      ...updatedUser,
+      role: updatedMembership.role,
+    });
   } catch (err) {
     console.error("❌ PATCH /api/team/:id error:", err);
     res.status(500).json({ error: "Failed to update team member" });

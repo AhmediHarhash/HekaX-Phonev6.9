@@ -1,10 +1,27 @@
 /**
  * Email Routes - Test endpoints for email service
+ * SECURITY: Protected with auth and strict rate limiting
  */
 
 const express = require("express");
 const router = express.Router();
 const emailService = require("../services/emailService");
+const { authMiddleware, requireRole } = require("../middleware/auth.middleware");
+const rateLimit = require("express-rate-limit");
+
+// Strict rate limiter for email testing (5 per hour per user)
+// Since this endpoint requires authentication, we key by user ID
+const emailTestLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5,
+  message: { error: "Too many test emails. Limit: 5 per hour." },
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Key by user ID (authMiddleware runs before this)
+  keyGenerator: (req) => `user:${req.user?.id || "anonymous"}`,
+  // Skip IPv6 validation since we're using user ID, not IP
+  validate: { xForwardedForHeader: false, trustProxy: false, default: false },
+});
 
 /**
  * GET /api/email/status
@@ -24,7 +41,7 @@ router.get("/status", (req, res) => {
  * - subject: email subject (optional, default: "Test Email")
  * - message: custom message (optional)
  */
-router.post("/test-email", async (req, res) => {
+router.post("/test-email", authMiddleware, requireRole("OWNER", "ADMIN"), emailTestLimiter, async (req, res) => {
   try {
     const { to, subject, message } = req.body;
 

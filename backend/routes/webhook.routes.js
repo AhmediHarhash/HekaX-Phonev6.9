@@ -117,8 +117,30 @@ async function handleCheckoutCompleted(session) {
   console.log("✅ Checkout completed:", session.id, "Mode:", session.mode);
 
   const organizationId = session.metadata?.organizationId;
+  const customerId = session.customer;
+
   if (!organizationId) {
     console.error("No organizationId in checkout session metadata");
+    return;
+  }
+
+  // SECURITY: Verify the organization exists and validate ownership
+  // For new customers: org must exist with matching ID
+  // For existing customers: org must own this Stripe customer
+  const org = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { id: true, stripeCustomerId: true },
+  });
+
+  if (!org) {
+    console.error("🚫 SECURITY: Organization not found for checkout:", organizationId);
+    return;
+  }
+
+  // If org already has a different Stripe customer, reject
+  if (org.stripeCustomerId && org.stripeCustomerId !== customerId) {
+    console.error("🚫 SECURITY: Stripe customer mismatch for org:", organizationId);
+    console.error(`   Expected: ${org.stripeCustomerId}, Got: ${customerId}`);
     return;
   }
 
@@ -130,7 +152,6 @@ async function handleCheckoutCompleted(session) {
 
   // Handle subscription checkout
   const subscriptionId = session.subscription;
-  const customerId = session.customer;
 
   // Determine plan from price ID
   const plan = determinePlanFromSession(session);
@@ -269,6 +290,19 @@ async function handleAddonPurchase(session) {
 
   if (!organizationId || !addonId) {
     console.error("Missing metadata for add-on purchase");
+    return;
+  }
+
+  // SECURITY: Verify organization owns this Stripe customer
+  const org = await prisma.organization.findFirst({
+    where: {
+      id: organizationId,
+      stripeCustomerId: session.customer,
+    },
+  });
+
+  if (!org) {
+    console.error("🚫 SECURITY: Add-on purchase customer mismatch for org:", organizationId);
     return;
   }
 

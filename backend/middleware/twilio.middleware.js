@@ -70,11 +70,10 @@ function validateTwilioWebhookFlexible(req, res, next) {
     return res.status(500).send("Server configuration error");
   }
 
-  // If no signature header, Twilio might not be sending it (check TwiML app config)
+  // If no signature header, reject the request
   if (!twilioSignature) {
-    console.warn(`⚠️ Missing Twilio signature from ${req.ip}: ${req.method} ${req.path}`);
-    // Allow through but log - some Twilio configurations don't send signatures
-    return next();
+    console.error(`🚫 Missing Twilio signature from ${req.ip}: ${req.method} ${req.path}`);
+    return res.status(403).send("Forbidden: Missing signature");
   }
 
   // Build possible URLs
@@ -97,11 +96,9 @@ function validateTwilioWebhookFlexible(req, res, next) {
   }
 
   if (!isValid) {
-    // Log but don't block - signature mismatch could be due to URL encoding differences
-    console.warn(`⚠️ Twilio signature mismatch from ${req.ip}: ${req.method} ${req.path}`);
-    console.warn(`   Tried URLs: ${urlVariations.join(", ")}`);
-    // For now, allow through to not break functionality
-    // In strict mode, you would return 403 here
+    console.error(`🚫 Invalid Twilio signature from ${req.ip}: ${req.method} ${req.path}`);
+    console.error(`   Tried URLs: ${urlVariations.join(", ")}`);
+    return res.status(403).send("Forbidden: Invalid webhook signature");
   }
 
   next();

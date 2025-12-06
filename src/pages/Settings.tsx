@@ -169,6 +169,34 @@ export function SettingsPage() {
   const [loadingVoice, setLoadingVoice] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Check URL for tab selection (e.g., from OAuth callbacks)
+  useEffect(() => {
+    const path = window.location.pathname;
+    const params = new URLSearchParams(window.location.search);
+
+    // If we're on /settings/integrations, switch to integrations tab
+    if (path.includes('/integrations')) {
+      setActiveTab('integrations');
+    }
+
+    // Check for OAuth callback success/error
+    const success = params.get('success');
+    const error = params.get('error');
+
+    if (success) {
+      setActiveTab('integrations');
+      const provider = success.replace('crm_', '').replace('calendar_', '');
+      setMessage({ type: 'success', text: `Successfully connected to ${provider}!` });
+      // Clean up URL
+      window.history.replaceState({}, '', '/settings/integrations');
+    } else if (error) {
+      setActiveTab('integrations');
+      setMessage({ type: 'error', text: decodeURIComponent(error) });
+      // Clean up URL
+      window.history.replaceState({}, '', '/settings/integrations');
+    }
+  }, []);
+
   // Cleanup audio on unmount
   useEffect(() => {
     return () => {

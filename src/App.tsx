@@ -38,12 +38,85 @@ const PageLoader = () => (
   </div>
 );
 
+// Map URL paths to page names
+const pathToPage: Record<string, Page> = {
+  '/': 'dashboard',
+  '/dashboard': 'dashboard',
+  '/calls': 'calls',
+  '/leads': 'leads',
+  '/softphone': 'softphone',
+  '/team': 'team',
+  '/settings': 'settings',
+  '/settings/integrations': 'settings',
+  '/phone-numbers': 'phone-numbers',
+  '/analytics': 'analytics',
+  '/audit-logs': 'audit-logs',
+  '/billing': 'billing',
+  '/enterprise': 'enterprise',
+  '/data-management': 'data-management',
+  '/ai-training': 'ai-training',
+  '/channels': 'channels',
+  '/automation': 'automation',
+};
+
+const pageToPath: Record<Page, string> = {
+  'dashboard': '/',
+  'calls': '/calls',
+  'leads': '/leads',
+  'softphone': '/softphone',
+  'team': '/team',
+  'settings': '/settings',
+  'phone-numbers': '/phone-numbers',
+  'analytics': '/analytics',
+  'audit-logs': '/audit-logs',
+  'billing': '/billing',
+  'enterprise': '/enterprise',
+  'data-management': '/data-management',
+  'ai-training': '/ai-training',
+  'channels': '/channels',
+  'automation': '/automation',
+};
+
+// Get initial page from URL
+function getPageFromUrl(): Page {
+  const path = window.location.pathname;
+  // Check for exact match first
+  if (pathToPage[path]) {
+    return pathToPage[path];
+  }
+  // Check for partial match (e.g., /settings/integrations -> settings)
+  for (const [urlPath, page] of Object.entries(pathToPage)) {
+    if (path.startsWith(urlPath) && urlPath !== '/') {
+      return page;
+    }
+  }
+  return 'dashboard';
+}
+
 // Main app content (requires auth)
 function AppContent() {
   const { isAuthenticated, isLoading, user, org, refreshUser } = useAuth();
-  const [currentPage, setCurrentPage] = useState<Page>('dashboard');
+  const [currentPage, setCurrentPage] = useState<Page>(getPageFromUrl);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showCreateOrgModal, setShowCreateOrgModal] = useState(false);
+
+  // Sync URL with page state
+  useEffect(() => {
+    const handlePopState = () => {
+      setCurrentPage(getPageFromUrl());
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  // Update URL when page changes
+  const handleNavigate = (page: Page) => {
+    const newPath = pageToPath[page] || '/';
+    if (window.location.pathname !== newPath) {
+      window.history.pushState({}, '', newPath);
+    }
+    setCurrentPage(page);
+  };
 
   // Check if onboarding needed for current org
   useEffect(() => {
@@ -56,16 +129,16 @@ function AppContent() {
 
   // Listen for navigation events from child components
   useEffect(() => {
-    const handleNavigate = (event: CustomEvent) => {
+    const handleNavigateEvent = (event: CustomEvent) => {
       const page = event.detail as Page;
       if (page) {
-        setCurrentPage(page);
+        handleNavigate(page);
       }
     };
 
-    window.addEventListener('navigate', handleNavigate as EventListener);
+    window.addEventListener('navigate', handleNavigateEvent as EventListener);
     return () => {
-      window.removeEventListener('navigate', handleNavigate as EventListener);
+      window.removeEventListener('navigate', handleNavigateEvent as EventListener);
     };
   }, []);
 
@@ -147,7 +220,7 @@ function AppContent() {
       {/* Sidebar with org switcher */}
       <Sidebar
         currentPage={currentPage}
-        onNavigate={setCurrentPage}
+        onNavigate={handleNavigate}
         onCreateOrg={() => setShowCreateOrgModal(true)}
       />
 

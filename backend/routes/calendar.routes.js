@@ -11,6 +11,7 @@ const { CalendarService, CalendarProvider } = require("../services/calendar");
 const GoogleCalendarProvider = require("../services/calendar/providers/google");
 const OutlookCalendarProvider = require("../services/calendar/providers/outlook");
 const CalendlyProvider = require("../services/calendar/providers/calendly");
+const automationService = require("../services/automation.service");
 
 const router = express.Router();
 const calendarService = new CalendarService(prisma);
@@ -304,6 +305,20 @@ router.post("/book", authMiddleware, async (req, res) => {
       addVideoConference,
     });
 
+    // Emit automation event for appointment booked
+    automationService.emit(
+      automationService.EVENTS.APPOINTMENT_BOOKED,
+      req.organizationId,
+      {
+        ...result,
+        callerName,
+        callerPhone,
+        callerEmail,
+        purpose,
+        scheduledAt: startTime,
+      }
+    );
+
     res.json(result);
   } catch (error) {
     console.error("❌ Book appointment error:", error);
@@ -400,6 +415,24 @@ router.patch("/bookings/:id", authMiddleware, async (req, res) => {
       where: { id },
       data: updateData,
     });
+
+    // Emit automation events based on status
+    if (status) {
+      const upperStatus = status.toUpperCase();
+      if (upperStatus === "CANCELLED") {
+        automationService.emit(
+          automationService.EVENTS.APPOINTMENT_CANCELLED,
+          req.organizationId,
+          { ...updated, cancelReason }
+        );
+      } else if (upperStatus === "NO_SHOW") {
+        automationService.emit(
+          automationService.EVENTS.APPOINTMENT_NO_SHOW,
+          req.organizationId,
+          updated
+        );
+      }
+    }
 
     res.json({ booking: updated });
   } catch (error) {

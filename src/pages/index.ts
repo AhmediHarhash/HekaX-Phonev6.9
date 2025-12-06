@@ -26,3 +26,8 @@ export { EnterprisePage } from './Enterprise';
 
 // Phase 6.5
 export { DataManagementPage } from './DataManagement';
+
+// Market Leader Features
+export { AITrainingPage } from './AITraining';
+export { ChannelsPage } from './Channels';
+export { AutomationPage } from './Automation';

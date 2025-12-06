@@ -23,6 +23,9 @@ import {
   OnboardingWizard,
   EnterprisePage,
   DataManagementPage,
+  AITrainingPage,
+  ChannelsPage,
+  AutomationPage,
 } from './pages';
 import type { Page } from './types';
 
@@ -113,6 +116,12 @@ function AppContent() {
         return <EnterprisePage />;
       case 'data-management':
         return <DataManagementPage />;
+      case 'ai-training':
+        return <AITrainingPage />;
+      case 'channels':
+        return <ChannelsPage />;
+      case 'automation':
+        return <AutomationPage />;
       default:
         return <DashboardPage />;
     }

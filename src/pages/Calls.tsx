@@ -12,10 +12,12 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { PageHeader } from '../components/layout';
-import { Card, LoadingSpinner, AIBadge, HumanBadge, EmptyState, Badge } from '../components/common';
+import { Card, LoadingSpinner, AIBadge, HumanBadge, EmptyState, Badge, AudioPlayer } from '../components/common';
 import { callsApi, type CallDetailsResponse } from '../utils/api';
 import { formatDuration, formatRelativeTime, formatDateTime } from '../utils/formatters';
 import type { CallRecord, TranscriptRecord } from '../types';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 type CallFilter = 'all' | 'ai' | 'human';
 
@@ -197,17 +199,11 @@ export function CallsPage() {
                   {call.handledByAI ? <AIBadge /> : <HumanBadge />}
                 </div>
 
-                {/* Recording Button */}
+                {/* Recording Indicator */}
                 {call.recordingUrl && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      window.open(call.recordingUrl + '.mp3', '_blank');
-                    }}
-                    className="p-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300"
-                  >
+                  <div className="w-6 text-emerald-400" title="Has recording">
                     <Play size={16} />
-                  </button>
+                  </div>
                 )}
               </div>
             ))
@@ -257,18 +253,16 @@ export function CallsPage() {
                     </div>
                   )}
 
-                  {/* Recording Button */}
+                  {/* Audio Player for Recording */}
                   {selectedCall.recordingUrl && (
-                    <button
-                      onClick={() => window.open(selectedCall.recordingUrl + '.mp3', '_blank')}
-                      className="
-                        w-full mt-4 py-2.5 rounded-lg font-medium
-                        bg-blue-600 hover:bg-blue-700 text-white
-                        flex items-center justify-center gap-2
-                      "
-                    >
-                      <Play size={18} /> Play Recording
-                    </button>
+                    <div className="pt-4 border-t border-slate-700">
+                      <h4 className="font-medium text-white mb-3">Call Recording</h4>
+                      <AudioPlayer
+                        src={`${selectedCall.recordingUrl}.mp3`}
+                        title={`Call from ${selectedCall.fromNumber}`}
+                        duration={selectedCall.duration}
+                      />
+                    </div>
                   )}
                 </div>
               )}

@@ -22,6 +22,9 @@ import {
   Database,
   Menu,
   X,
+  Brain,
+  MessageSquare,
+  Zap,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { OrganizationSwitcher } from './OrganizationSwitcher';
@@ -39,7 +42,10 @@ const navItems: { id: Page; label: string; icon: typeof Phone }[] = [
   { id: 'leads', label: 'Leads', icon: Target },
   { id: 'softphone', label: 'Softphone', icon: Phone },
   { id: 'phone-numbers', label: 'Phone Numbers', icon: PhoneForwarded },
+  { id: 'channels', label: 'Channels', icon: MessageSquare },
   { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+  { id: 'automation', label: 'Automation', icon: Zap },
+  { id: 'ai-training', label: 'AI Training', icon: Brain },
   { id: 'team', label: 'Team', icon: Users },
   { id: 'billing', label: 'Billing', icon: CreditCard },
   { id: 'enterprise', label: 'Enterprise', icon: Key },

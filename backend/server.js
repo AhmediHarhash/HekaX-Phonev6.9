@@ -295,6 +295,34 @@ try {
   app.use("/api/email", emailRoutes);
   app.use("/api", emailRoutes); // Also mount at /api for /api/test-email
 
+  // Real-time routes
+  const realtimeRoutes = require("./routes/realtime.routes");
+  app.use("/api/realtime", realtimeRoutes);
+
+  // Routing rules routes
+  const routingRoutes = require("./routes/routing.routes");
+  app.use("/api/routing", routingRoutes);
+
+  // Analytics routes
+  const analyticsRoutes = require("./routes/analytics.routes");
+  app.use("/api/analytics", analyticsRoutes);
+
+  // AI Feedback routes
+  const feedbackRoutes = require("./routes/feedback.routes");
+  app.use("/api/feedback", feedbackRoutes);
+
+  // AI Training routes
+  const trainingRoutes = require("./routes/training.routes");
+  app.use("/api/training", trainingRoutes);
+
+  // Multi-channel routes
+  const channelsRoutes = require("./routes/channels.routes");
+  app.use("/api/channels", channelsRoutes);
+
+  // Automation routes
+  const automationRoutes = require("./routes/automation.routes");
+  app.use("/api/automation", automationRoutes);
+
   console.log("✅ API routes loaded");
 } catch (err) {
   console.error("❌ API routes error:", err);
@@ -539,6 +567,15 @@ async function startServer() {
     await prisma.$connect();
     console.log("✅ Database connected");
 
+    // Start automation scheduler
+    try {
+      const schedulerService = require("./services/scheduler.service");
+      schedulerService.start();
+      console.log("✅ Automation scheduler started");
+    } catch (err) {
+      console.error("⚠️ Scheduler not available:", err.message);
+    }
+
     server.listen(PORT, HOST, () => {
       console.log(`
 ╔═══════════════════════════════════════════════════════════╗
@@ -550,6 +587,7 @@ async function startServer() {
 ║  Database:   ✅ CONNECTED                                 ║
 ║  WebSocket:  ✅ READY                                     ║
 ║  Security:   ✅ ENABLED                                   ║
+║  Automation: ✅ SCHEDULER RUNNING                         ║
 ╠═══════════════════════════════════════════════════════════╣
 ║  Security Features:                                       ║
 ║  • Rate limiting (auth, API, webhooks)                    ║

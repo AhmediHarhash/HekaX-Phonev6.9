@@ -31,6 +31,7 @@ import {
   Globe,
   X,
   Calendar,
+  MessageSquare,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { PageHeader } from '../components/layout';
@@ -108,7 +109,7 @@ const CALENDAR_PROVIDERS = [
 // Voice preview cache
 const voicePreviewCache: Record<string, string> = {};
 
-type SettingsTab = 'general' | 'ai' | 'integrations' | 'notifications' | 'preferences';
+type SettingsTab = 'general' | 'ai' | 'integrations' | 'notifications' | 'sms' | 'preferences';
 
 interface CRMIntegration {
   id: string;
@@ -260,6 +261,7 @@ export function SettingsPage() {
     { id: 'ai', label: 'AI Receptionist', icon: Volume2 },
     { id: 'integrations', label: 'Integrations', icon: Link },
     { id: 'notifications', label: 'Notifications', icon: Bell },
+    { id: 'sms', label: 'SMS', icon: MessageSquare },
     { id: 'preferences', label: 'Preferences', icon: Palette },
   ] as const;
 
@@ -542,6 +544,9 @@ export function SettingsPage() {
             </div>
           </div>
         )}
+
+        {/* SMS Tab */}
+        {activeTab === 'sms' && <SMSSettingsTab setMessage={setMessage} />}
 
         {/* Preferences Tab */}
         {activeTab === 'preferences' && <PreferencesTab />}
@@ -1242,6 +1247,235 @@ function PreferencesTab() {
       <p className="text-xs text-slate-500 mt-4">
         Preferences are saved automatically to your browser
       </p>
+    </div>
+  );
+}
+
+// ============================================================================
+// SMS Settings Tab Component
+// ============================================================================
+
+// Industry templates for SMS
+const INDUSTRY_TEMPLATES: Record<string, string> = {
+  healthcare: "Hi {name}, thank you for calling {company}. If you need to schedule an appointment or have questions, please call us back at {phone}. We're here to help!",
+  legal: "Thank you for contacting {company}. If you have additional questions about your case, please call us at {phone}. We appreciate your trust in our firm.",
+  realestate: "Hi {name}! Thanks for reaching out to {company}. Ready to find your perfect property? Call us at {phone} or visit our website for listings.",
+  automotive: "Thanks for calling {company}! Whether you're looking for service or sales, we're here to help. Call us back at {phone} or stop by the dealership.",
+  restaurant: "Thanks for calling {company}! We'd love to serve you. Make a reservation or order online, or call us at {phone}.",
+  general: "Thank you for calling {company}. We appreciate your interest! If you have any questions, please don't hesitate to call us back at {phone}.",
+};
+
+interface SMSSettings {
+  followUpEnabled: boolean;
+  followUpTemplate: string;
+  missedCallSms: boolean;
+  appointmentReminders: boolean;
+}
+
+function SMSSettingsTab({ setMessage }: { setMessage: (msg: { type: 'success' | 'error'; text: string } | null) => void }) {
+  const { org, updateOrg } = useAuth();
+  const [saving, setSaving] = useState(false);
+  const [settings, setSettings] = useState<SMSSettings>({
+    followUpEnabled: false,
+    followUpTemplate: INDUSTRY_TEMPLATES[org?.industry || 'general'] || INDUSTRY_TEMPLATES.general,
+    missedCallSms: false,
+    appointmentReminders: true,
+  });
+
+  // Load existing settings
+  useEffect(() => {
+    if (org?.smsSettings) {
+      try {
+        const parsed = JSON.parse(org.smsSettings);
+        setSettings(prev => ({ ...prev, ...parsed }));
+      } catch (e) {
+        console.error('Failed to parse SMS settings:', e);
+      }
+    }
+  }, [org?.smsSettings]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await orgApi.update({
+        smsSettings: JSON.stringify(settings),
+      });
+      updateOrg({ ...org!, smsSettings: JSON.stringify(settings) });
+      setMessage({ type: 'success', text: 'SMS settings saved successfully!' });
+    } catch (err) {
+      setMessage({ type: 'error', text: 'Failed to save SMS settings' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const selectTemplate = (industry: string) => {
+    setSettings(prev => ({
+      ...prev,
+      followUpTemplate: INDUSTRY_TEMPLATES[industry] || INDUSTRY_TEMPLATES.general,
+    }));
+  };
+
+  return (
+    <div className="space-y-6">
+      <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+        <MessageSquare size={20} className="text-emerald-400" />
+        SMS Settings
+      </h3>
+
+      <p className="text-sm text-slate-400 mb-6">
+        Configure automatic SMS follow-ups after calls and appointment reminders.
+      </p>
+
+      {/* SMS Follow-up Toggle */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 max-w-2xl p-4 rounded-xl bg-slate-800/30 border border-slate-700/50">
+        <div>
+          <label className="text-sm font-medium text-white">
+            Call Follow-up SMS
+          </label>
+          <p className="text-sm text-slate-500">
+            Automatically send a thank you SMS after calls
+          </p>
+        </div>
+        <label className="relative inline-block w-12 h-6 cursor-pointer flex-shrink-0">
+          <input
+            type="checkbox"
+            checked={settings.followUpEnabled}
+            onChange={(e) => setSettings(prev => ({ ...prev, followUpEnabled: e.target.checked }))}
+            className="sr-only peer"
+          />
+          <div className="w-12 h-6 rounded-full bg-slate-700 peer-checked:bg-emerald-600 transition-colors" />
+          <div className="absolute left-1 top-1 w-4 h-4 rounded-full bg-white transition-transform peer-checked:translate-x-6" />
+        </label>
+      </div>
+
+      {/* Follow-up Template */}
+      {settings.followUpEnabled && (
+        <div className="max-w-2xl">
+          <label className="block text-sm font-medium text-slate-300 mb-2">
+            Follow-up Message Template
+          </label>
+
+          {/* Quick Templates */}
+          <div className="flex flex-wrap gap-2 mb-3">
+            <span className="text-xs text-slate-500">Quick templates:</span>
+            {Object.keys(INDUSTRY_TEMPLATES).map(industry => (
+              <button
+                key={industry}
+                onClick={() => selectTemplate(industry)}
+                className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 capitalize transition-colors"
+              >
+                {industry}
+              </button>
+            ))}
+          </div>
+
+          <textarea
+            value={settings.followUpTemplate}
+            onChange={(e) => setSettings(prev => ({ ...prev, followUpTemplate: e.target.value }))}
+            rows={4}
+            className="
+              w-full px-4 py-3 rounded-lg
+              bg-slate-900 border border-slate-700
+              text-white placeholder-slate-500
+              focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500
+              resize-none transition-all font-mono text-sm
+            "
+          />
+          <div className="mt-2 flex flex-wrap gap-2">
+            <span className="text-xs text-slate-500">Available variables:</span>
+            {['{name}', '{company}', '{phone}', '{duration}'].map(variable => (
+              <code
+                key={variable}
+                className="text-xs px-2 py-0.5 rounded bg-blue-500/20 text-blue-400"
+              >
+                {variable}
+              </code>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Missed Call SMS */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 max-w-2xl p-4 rounded-xl bg-slate-800/30 border border-slate-700/50">
+        <div>
+          <label className="text-sm font-medium text-white">
+            Missed Call SMS
+          </label>
+          <p className="text-sm text-slate-500">
+            Send SMS when a call is missed or goes to voicemail
+          </p>
+        </div>
+        <label className="relative inline-block w-12 h-6 cursor-pointer flex-shrink-0">
+          <input
+            type="checkbox"
+            checked={settings.missedCallSms}
+            onChange={(e) => setSettings(prev => ({ ...prev, missedCallSms: e.target.checked }))}
+            className="sr-only peer"
+          />
+          <div className="w-12 h-6 rounded-full bg-slate-700 peer-checked:bg-emerald-600 transition-colors" />
+          <div className="absolute left-1 top-1 w-4 h-4 rounded-full bg-white transition-transform peer-checked:translate-x-6" />
+        </label>
+      </div>
+
+      {/* Appointment Reminders */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 max-w-2xl p-4 rounded-xl bg-slate-800/30 border border-slate-700/50">
+        <div>
+          <label className="text-sm font-medium text-white">
+            Appointment Reminders
+          </label>
+          <p className="text-sm text-slate-500">
+            Send SMS reminders before scheduled appointments
+          </p>
+        </div>
+        <label className="relative inline-block w-12 h-6 cursor-pointer flex-shrink-0">
+          <input
+            type="checkbox"
+            checked={settings.appointmentReminders}
+            onChange={(e) => setSettings(prev => ({ ...prev, appointmentReminders: e.target.checked }))}
+            className="sr-only peer"
+          />
+          <div className="w-12 h-6 rounded-full bg-slate-700 peer-checked:bg-emerald-600 transition-colors" />
+          <div className="absolute left-1 top-1 w-4 h-4 rounded-full bg-white transition-transform peer-checked:translate-x-6" />
+        </label>
+      </div>
+
+      {/* SMS Preview */}
+      <div className="max-w-2xl p-4 bg-slate-900/50 rounded-xl border border-slate-700">
+        <h4 className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
+          <MessageSquare size={16} />
+          Preview
+        </h4>
+        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3">
+          <p className="text-sm text-slate-300">
+            {settings.followUpTemplate
+              .replace(/\{name\}/g, 'John')
+              .replace(/\{company\}/g, org?.name || 'Your Company')
+              .replace(/\{phone\}/g, org?.twilioNumber || '(555) 123-4567')
+              .replace(/\{duration\}/g, '3 minutes')}
+          </p>
+        </div>
+        <p className="text-xs text-slate-500 mt-2">
+          Estimated SMS segments: {Math.ceil(settings.followUpTemplate.length / 160)}
+        </p>
+      </div>
+
+      {/* Save Button */}
+      <div className="pt-6 border-t border-slate-700">
+        <Button onClick={handleSave} disabled={saving}>
+          {saving ? (
+            <>
+              <RefreshCw size={18} className="animate-spin" />
+              Saving...
+            </>
+          ) : (
+            <>
+              <Save size={18} />
+              Save SMS Settings
+            </>
+          )}
+        </Button>
+      </div>
     </div>
   );
 }

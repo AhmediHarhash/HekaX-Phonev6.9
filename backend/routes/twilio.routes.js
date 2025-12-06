@@ -17,6 +17,20 @@ const router = express.Router();
 
 const VoiceResponse = twilio.twiml.VoiceResponse;
 
+// Services
+let smsService, voicemailService, automationService;
+try {
+  automationService = require("../services/automation.service");
+} catch (err) {
+  console.log("⚠️ Automation service not available:", err.message);
+}
+try {
+  smsService = require("../services/sms.service");
+  voicemailService = require("../services/voicemail.service");
+} catch (err) {
+  console.log("⚠️ SMS/Voicemail services not available:", err.message);
+}
+
 // Apply rate limiting to all Twilio routes
 router.use(webhookLimiter);
 
@@ -261,7 +275,7 @@ router.post(
         organizationId = phoneRecord?.organizationId;
       }
 
-      await prisma.callLog.upsert({
+      const callData = await prisma.callLog.upsert({
         where: { callSid: CallSid },
         update: {
           status: CallStatus.toUpperCase(),
@@ -280,6 +294,40 @@ router.post(
       });
 
       console.log("📡 Call logged for org:", organizationId);
+
+      // Emit automation events
+      if (automationService && organizationId) {
+        const eventData = {
+          callSid: CallSid,
+          fromNumber: From,
+          toNumber: To,
+          direction: isInbound ? "INBOUND" : "OUTBOUND",
+          status: CallStatus.toUpperCase(),
+          duration: CallDuration ? parseInt(CallDuration) : 0,
+          ...callData,
+        };
+
+        const status = CallStatus.toUpperCase();
+        if (status === "COMPLETED") {
+          automationService.emit(
+            automationService.EVENTS.CALL_COMPLETED,
+            organizationId,
+            eventData
+          );
+        } else if (status === "NO_ANSWER" || status === "BUSY" || status === "FAILED") {
+          automationService.emit(
+            automationService.EVENTS.CALL_MISSED,
+            organizationId,
+            eventData
+          );
+        } else if (status === "IN_PROGRESS" || status === "RINGING") {
+          automationService.emit(
+            automationService.EVENTS.CALL_STARTED,
+            organizationId,
+            eventData
+          );
+        }
+      }
     } catch (err) {
       console.error("❌ Call status DB error:", err);
     }
@@ -403,7 +451,10 @@ router.post(
       twiml.record({
         maxLength: 120,
         transcribe: true,
-        recordingStatusCallback: `${process.env.PUBLIC_BASE_URL}/twilio/recording/callback`,
+        transcribeCallback: `${process.env.PUBLIC_BASE_URL}/twilio/voicemail/transcription`,
+        recordingStatusCallback: `${process.env.PUBLIC_BASE_URL}/twilio/voicemail/callback`,
+        recordingStatusCallbackEvent: "completed",
+        playBeep: true,
       });
     } else {
       twiml.hangup();
@@ -411,6 +462,42 @@ router.post(
 
     res.type("text/xml");
     res.send(twiml.toString());
+  }
+);
+
+// ============================================================================
+// POST /twilio/amd/callback
+// Handle Answering Machine Detection results
+// Used for outbound calls to detect voicemail vs human
+// ============================================================================
+
+router.post(
+  "/amd/callback",
+  validateTwilioWebhookFlexible,
+  async (req, res) => {
+    const { CallSid, AnsweredBy, MachineDetectionDuration } = req.body;
+    console.log("🤖 AMD Result:", { CallSid, AnsweredBy, MachineDetectionDuration });
+
+    try {
+      // Update call log with AMD result
+      await prisma.callLog.updateMany({
+        where: { callSid: CallSid },
+        data: {
+          answeredBy: AnsweredBy, // human, machine_start, machine_end_beep, machine_end_silence, machine_end_other, fax, unknown
+          amdDuration: MachineDetectionDuration ? parseInt(MachineDetectionDuration) : null,
+        },
+      });
+
+      // If voicemail detected, leave a message
+      if (AnsweredBy && AnsweredBy.startsWith("machine")) {
+        console.log("📨 Voicemail detected - will leave message");
+        // The message is handled by the main voice webhook based on AMD result
+      }
+    } catch (err) {
+      console.error("❌ AMD callback error:", err);
+    }
+
+    res.sendStatus(200);
   }
 );
 
@@ -435,7 +522,7 @@ router.post("/voice/fallback", validateTwilioWebhookFlexible, (req, res) => {
 
 // ============================================================================
 // POST /twilio/sms/incoming
-// Handle incoming SMS (placeholder for future)
+// Handle incoming SMS
 // ============================================================================
 
 router.post(
@@ -452,8 +539,147 @@ router.post(
     const MessagingResponse = twilio.twiml.MessagingResponse;
     const twiml = new MessagingResponse();
 
+    try {
+      // Find organization by phone number
+      const org = await prisma.organization.findFirst({
+        where: { twilioNumber: To },
+      });
+
+      if (org) {
+        // Check for appointment confirmation
+        const upperBody = Body?.toUpperCase()?.trim();
+        if (upperBody === "CONFIRM" || upperBody === "YES") {
+          // Find pending booking for this number
+          const booking = await prisma.calendarBooking.findFirst({
+            where: {
+              callerPhone: From,
+              organizationId: org.id,
+              status: "PENDING",
+            },
+            orderBy: { createdAt: "desc" },
+          });
+
+          if (booking) {
+            await prisma.calendarBooking.update({
+              where: { id: booking.id },
+              data: { status: "CONFIRMED" },
+            });
+            twiml.message("Your appointment has been confirmed. Thank you!");
+          }
+        } else if (upperBody === "STOP" || upperBody === "UNSUBSCRIBE") {
+          // Handle opt-out (required by law)
+          twiml.message("You have been unsubscribed and will not receive further messages.");
+        }
+      }
+    } catch (err) {
+      console.error("❌ Incoming SMS processing error:", err);
+    }
+
     res.type("text/xml");
     res.send(twiml.toString());
+  }
+);
+
+// ============================================================================
+// POST /twilio/sms/status
+// Handle SMS delivery status updates
+// ============================================================================
+
+router.post(
+  "/sms/status",
+  validateTwilioWebhookFlexible,
+  async (req, res) => {
+    const { MessageSid, MessageStatus, To, ErrorCode } = req.body;
+    console.log("📱 SMS Status:", { MessageSid, MessageStatus, To, ErrorCode });
+
+    // Could log SMS delivery status to database if needed
+    res.sendStatus(200);
+  }
+);
+
+// ============================================================================
+// POST /twilio/voicemail/callback
+// Handle voicemail recording completion
+// ============================================================================
+
+router.post(
+  "/voicemail/callback",
+  validateTwilioWebhookFlexible,
+  async (req, res) => {
+    console.log("📨 Voicemail callback:", req.body);
+
+    if (voicemailService) {
+      try {
+        await voicemailService.processVoicemail(req.body);
+      } catch (err) {
+        console.error("❌ Voicemail processing error:", err);
+      }
+    }
+
+    res.sendStatus(200);
+  }
+);
+
+// ============================================================================
+// POST /twilio/voicemail/transcription
+// Handle voicemail transcription completion
+// ============================================================================
+
+router.post(
+  "/voicemail/transcription",
+  validateTwilioWebhookFlexible,
+  async (req, res) => {
+    const { CallSid, TranscriptionText, TranscriptionStatus } = req.body;
+    console.log("📝 Voicemail transcription:", { CallSid, TranscriptionStatus });
+
+    try {
+      // Update voicemail with transcription
+      await prisma.voicemail.updateMany({
+        where: { callSid: CallSid },
+        data: {
+          transcription: TranscriptionText,
+          transcriptionStatus: TranscriptionStatus === "completed" ? "completed" : "failed",
+        },
+      });
+    } catch (err) {
+      console.error("❌ Transcription update error:", err);
+    }
+
+    res.sendStatus(200);
+  }
+);
+
+// ============================================================================
+// POST /twilio/call/completed
+// Hook to trigger SMS follow-up after call completion
+// ============================================================================
+
+router.post(
+  "/call/completed",
+  validateTwilioWebhookFlexible,
+  async (req, res) => {
+    const { CallSid, CallStatus, AccountSid } = req.body;
+    console.log("📞 Call completed hook:", { CallSid, CallStatus });
+
+    if (CallStatus === "completed" && smsService) {
+      try {
+        // Find organization
+        const org = await prisma.organization.findFirst({
+          where: { twilioSubAccountSid: AccountSid },
+        });
+
+        if (org?.id) {
+          // Trigger SMS follow-up (async, don't wait)
+          smsService.sendCallFollowUp(CallSid, org.id).catch(err => {
+            console.log("ℹ️ SMS follow-up skipped:", err.message);
+          });
+        }
+      } catch (err) {
+        console.error("❌ Call completed hook error:", err);
+      }
+    }
+
+    res.sendStatus(200);
   }
 );
 

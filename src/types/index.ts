@@ -46,6 +46,8 @@ export interface AuthOrg {
   timezone?: string;
   businessHours?: BusinessHours;
   afterHoursMode?: 'ai' | 'voicemail' | 'forward';
+  // SMS Settings
+  smsSettings?: string; // JSON string
 }
 
 export type UserRole = 'OWNER' | 'ADMIN' | 'MANAGER' | 'AGENT' | 'VIEWER';
@@ -254,19 +256,22 @@ export interface UsageLog {
 }
 
 // Navigation Types
-export type Page = 
-  | 'dashboard' 
-  | 'calls' 
-  | 'leads' 
-  | 'softphone' 
-  | 'settings' 
+export type Page =
+  | 'dashboard'
+  | 'calls'
+  | 'leads'
+  | 'softphone'
+  | 'settings'
   | 'team'
   | 'phone-numbers'
   | 'analytics'
   | 'audit-logs'
   | 'billing'
   | 'enterprise'
-  | 'data-management';
+  | 'data-management'
+  | 'ai-training'
+  | 'channels'
+  | 'automation';
 
 // Twilio Types
 export interface TwilioDevice {

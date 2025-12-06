@@ -184,6 +184,9 @@ model Organization {
   notifyOnNewLead    Boolean @default(true)
   notifyOnMissedCall Boolean @default(true)
 
+  // SMS Settings (JSON: { followUpEnabled, followUpTemplate, missedCallSms, appointmentReminders })
+  smsSettings        String? @db.Text
+
   // BYO Keys (Enterprise Feature)
   byoKeysEnabled       Boolean @default(false)
   byoOpenaiKey         String? // Encrypted
@@ -204,10 +207,14 @@ model Organization {
   lastCleanupAt           DateTime?
   dataExportRequests      DataExportRequest[]
 
+  // After Hours Forwarding
+  afterHoursForwardNumber String?
+
   // Relations
   users           User[]
   memberships     UserOrganization[]
   callLogs        CallLog[]
+  callRoutes      CallRoute[]
   leads           Lead[]
   transcripts     Transcript[]
   phoneNumbers    PhoneNumber[]
@@ -220,6 +227,7 @@ model Organization {
   calendarIntegrations CalendarIntegration[]
   calendarBookings     CalendarBooking[]
   crmIntegrations      CrmIntegration[]
+  channels             Channel[]
 
   @@index([slug])
   @@index([status])
@@ -272,6 +280,8 @@ model User {
   callsHandled  CallLog[] @relation("HandledBy")
   calendarConnections CalendarIntegration[] @relation("CalendarConnectedBy")
   crmConnections      CrmIntegration[]      @relation("CRMConnectedBy")
+  aiFeedback          AIFeedback[]
+  assignedConversations Conversation[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -294,8 +304,10 @@ model UserOrganization {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  role      UserRole @default(AGENT)
-  isPrimary Boolean  @default(false) // User's primary/default org
+  role       UserRole @default(AGENT)
+  department String?
+  status     String   @default("ACTIVE") // ACTIVE, INACTIVE, INVITED, SUSPENDED
+  isPrimary  Boolean  @default(false) // User's primary/default org
 
   invitedBy   String?
   invitedAt   DateTime @default(now())
@@ -333,6 +345,14 @@ model CallLog {
   transferredToHuman Boolean @default(false)
   transferReason     String?
 
+  // SMS Follow-up
+  followUpSmsSent   Boolean   @default(false)
+  followUpSmsSentAt DateTime?
+
+  // Answering Machine Detection
+  answeredBy  String? // human, machine_start, machine_end_beep, etc.
+  amdDuration Int?
+
   sentiment      String?
   sentimentScore Float?
   topics         String[]
@@ -352,6 +372,7 @@ model CallLog {
 
   transcript Transcript?
   lead       Lead?
+  aiFeedback AIFeedback[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -456,6 +477,7 @@ model Lead {
 
   score       Int      @default(0)
   temperature LeadTemp @default(WARM)
+  isVIP       Boolean  @default(false)
 
   status     LeadStatus @default(NEW)
   stage      String     @default("new")
@@ -835,6 +857,9 @@ model CalendarBooking {
   callSid    String? // Call that initiated the booking
   bookedByAI Boolean @default(true)
 
+  // Automation
+  reminderSent Boolean @default(false)
+
   // Relations
   calendarIntegrationId String?
   calendarIntegration   CalendarIntegration? @relation(fields: [calendarIntegrationId], references: [id])
@@ -941,4 +966,556 @@ model CrmSyncLog {
   @@index([syncType])
   @@index([status])
   @@index([createdAt])
+}
+
+// ============================================================================
+// VOICEMAIL
+// ============================================================================
+
+model Voicemail {
+  id      String @id @default(cuid())
+  callSid String @unique
+
+  fromNumber String
+  toNumber   String
+
+  // Recording
+  recordingUrl      String?
+  recordingSid      String?
+  duration          Int     @default(0)
+
+  // Transcription
+  transcription       String? @db.Text
+  transcriptionStatus String  @default("pending") // pending, completed, failed
+
+  // Status
+  status  String    @default("new") // new, read, archived, deleted
+  readAt  DateTime?
+  readBy  String?
+
+  // Organization
+  organizationId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// CALL ROUTING
+// ============================================================================
+
+model CallRoute {
+  id   String @id @default(cuid())
+  name String
+
+  // Priority (lower = higher priority)
+  priority Int @default(0)
+
+  // Action type: FORWARD, VOICEMAIL, DEPARTMENT, AI, QUEUE
+  action CallRouteAction
+
+  // Forward settings
+  forwardNumber String?
+
+  // Department settings
+  department String?
+
+  // Voicemail/greeting settings
+  customGreeting String? @db.Text
+
+  // AI settings
+  aiPersonality String?
+
+  // Queue settings
+  queueId     String?
+  maxWaitTime Int? // seconds
+
+  // Time-based conditions
+  scheduleStart String?    // HH:MM format
+  scheduleEnd   String?    // HH:MM format
+  daysOfWeek    Int[]      // 0=Sunday, 6=Saturday
+
+  // Caller conditions
+  callerPattern String? // Regex pattern for matching caller numbers
+
+  // Conditional flags
+  vipOnly           Boolean @default(false)
+  businessHoursOnly Boolean @default(false)
+
+  enabled Boolean @default(true)
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([enabled])
+  @@index([priority])
+}
+
+enum CallRouteAction {
+  FORWARD
+  VOICEMAIL
+  DEPARTMENT
+  AI
+  QUEUE
+}
+
+// ============================================================================
+// AI FEEDBACK & LEARNING
+// ============================================================================
+
+enum FeedbackType {
+  CORRECTION
+  RATING
+  SUGGESTION
+}
+
+enum FeedbackCategory {
+  ACCURACY
+  TONE
+  COMPLETENESS
+  RELEVANCE
+  TIMING
+  OTHER
+}
+
+enum FeedbackStatus {
+  PENDING
+  REVIEWED
+  APPLIED
+  REJECTED
+}
+
+enum LearningStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+model AIFeedback {
+  id String @id @default(cuid())
+
+  // What is being reviewed
+  callId       String?
+  transcriptId String?
+  messageIndex Int? // Which message in transcript
+
+  // Feedback details
+  feedbackType FeedbackType
+  rating       Int? // 1-5 for ratings
+  category     FeedbackCategory?
+
+  // Content
+  originalResponse  String? @db.Text
+  correctedResponse String? @db.Text
+  notes             String? @db.Text
+
+  // Review status
+  status      FeedbackStatus @default(PENDING)
+  reviewNotes String?        @db.Text
+  reviewedAt  DateTime?
+
+  // Organization and user
+  organizationId String
+  userId         String?
+
+  // Relations
+  call      CallLog? @relation(fields: [callId], references: [id])
+  user      User?    @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  learningQueue AILearningQueue[]
+
+  @@index([organizationId])
+  @@index([callId])
+  @@index([status])
+  @@index([feedbackType])
+  @@index([createdAt])
+}
+
+model AILearningQueue {
+  id String @id @default(cuid())
+
+  // Reference to feedback
+  feedbackId String
+  feedback   AIFeedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+
+  // Priority (higher = more important)
+  priority Int @default(1)
+
+  // Processing status
+  status      LearningStatus @default(PENDING)
+  processedAt DateTime?
+  result      String?        @db.Text
+
+  organizationId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([priority])
+}
+
+// ============================================================================
+// AI TRAINING DATA
+// ============================================================================
+
+model AIFAQ {
+  id String @id @default(cuid())
+
+  question String  @db.Text
+  answer   String  @db.Text
+  category String  @default("general")
+  priority Int     @default(0)
+  keywords String[]
+
+  organizationId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([category])
+}
+
+model AIScript {
+  id String @id @default(cuid())
+
+  name        String
+  description String?  @db.Text
+  scenario    String   @db.Text // When to use this script
+  script      String   @db.Text // The actual script/response
+
+  isActive Boolean @default(true)
+
+  organizationId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([isActive])
+}
+
+model AICustomResponse {
+  id String @id @default(cuid())
+
+  triggerPhrase String @db.Text  // Phrase that triggers this response
+  response      String @db.Text  // The custom response
+  matchType     String @default("contains") // exact, contains, regex
+
+  isActive Boolean @default(true)
+
+  organizationId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([isActive])
+}
+
+model AIKnowledgeBase {
+  id String @id @default(cuid())
+
+  title     String
+  content   String  @db.Text
+  category  String  @default("general")
+  source    String? // Where this info came from
+  sourceUrl String?
+
+  organizationId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([category])
+}
+
+// ============================================================================
+// MULTI-CHANNEL (WhatsApp, Webchat, etc.)
+// ============================================================================
+
+enum ChannelType {
+  WHATSAPP
+  WEBCHAT
+  SMS
+  MESSENGER
+  TELEGRAM
+}
+
+enum ConversationStatus {
+  ACTIVE
+  CLOSED
+  TRANSFERRED
+  PENDING
+}
+
+model Channel {
+  id String @id @default(cuid())
+
+  type    ChannelType
+  name    String
+  enabled Boolean     @default(true)
+
+  // Channel-specific configuration (JSON)
+  config Json @default("{}")
+
+  // AI settings
+  greeting      String? @db.Text
+  aiEnabled     Boolean @default(true)
+  aiPersonality String?
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  conversations Conversation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, type])
+  @@index([organizationId])
+  @@index([type])
+  @@index([enabled])
+}
+
+model Conversation {
+  id String @id @default(cuid())
+
+  // External identifiers
+  externalId String? // Phone number, session ID, etc.
+
+  // Participant info
+  participantName  String?
+  participantPhone String?
+  participantEmail String?
+
+  // Status
+  status      ConversationStatus @default(ACTIVE)
+  resolution  String?
+  closedAt    DateTime?
+  transferredAt DateTime?
+
+  // Assignment
+  assignedToId String?
+  assignedTo   User?   @relation(fields: [assignedToId], references: [id])
+
+  // Metadata
+  metadata     Json?
+  greetingSent Boolean @default(false)
+
+  // Relations
+  channelId String
+  channel   Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  organizationId String
+
+  messages ChannelMessage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([channelId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([externalId])
+  @@index([createdAt])
+}
+
+model ChannelMessage {
+  id String @id @default(cuid())
+
+  // Direction
+  direction String // INBOUND, OUTBOUND
+
+  // Content
+  content     String  @db.Text
+  contentType String  @default("text") // text, image, file, audio, video
+
+  // External tracking
+  externalId String? // Message ID from provider
+  status     String  @default("SENT") // PENDING, SENT, DELIVERED, READ, FAILED
+
+  // Response time tracking (ms)
+  responseTimeMs Int?
+
+  // Metadata
+  metadata Json?
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([conversationId])
+  @@index([direction])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// AUTOMATION ENGINE
+// ============================================================================
+
+model AutomationRule {
+  id String @id @default(cuid())
+
+  name        String
+  description String?
+  enabled     Boolean @default(true)
+  priority    Int     @default(0)
+
+  // Trigger
+  triggerEvent String // Event type that triggers this rule
+
+  // Conditions (JSON array of condition objects)
+  conditions Json? // [{ field, operator, value }]
+
+  // Actions (JSON array of action objects)
+  actions Json // [{ type, ...params }]
+
+  organizationId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  logs AutomationLog[]
+
+  @@index([organizationId])
+  @@index([triggerEvent])
+  @@index([enabled])
+}
+
+model AutomationLog {
+  id String @id @default(cuid())
+
+  ruleId   String?
+  ruleName String?
+
+  triggerEvent     String
+  eventData        String? @db.Text
+  actionsExecuted  Json?
+  status           String  // SUCCESS, FAILED
+  result           String? @db.Text
+  error            String? @db.Text
+
+  organizationId String
+
+  rule AutomationRule? @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([ruleId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Task {
+  id String @id @default(cuid())
+
+  title       String
+  description String?  @db.Text
+  priority    String   @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  status      String   @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, CANCELLED
+
+  dueAt       DateTime?
+  completedAt DateTime?
+
+  assignedToId  String?
+  relatedLeadId String?
+
+  organizationId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([assignedToId])
+  @@index([status])
+  @@index([dueAt])
+}
+
+model Notification {
+  id String @id @default(cuid())
+
+  type    String  @default("INFO") // INFO, WARNING, ERROR, SUCCESS
+  title   String
+  message String  @db.Text
+
+  read   Boolean   @default(false)
+  readAt DateTime?
+
+  targetUserId String?
+  data         Json?
+
+  organizationId String
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([targetUserId])
+  @@index([read])
+  @@index([createdAt])
+}
+
+model Sequence {
+  id String @id @default(cuid())
+
+  name        String
+  description String?
+  enabled     Boolean @default(true)
+
+  // Steps (JSON array of step objects)
+  steps Json // [{ type, delayMinutes, message/subject/body }]
+
+  organizationId String
+
+  enrollments SequenceEnrollment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([enabled])
+}
+
+model SequenceEnrollment {
+  id String @id @default(cuid())
+
+  currentStep Int      @default(0)
+  status      String   @default("ACTIVE") // ACTIVE, PAUSED, COMPLETED, CANCELLED
+
+  nextStepAt  DateTime?
+  lastStepAt  DateTime?
+  completedAt DateTime?
+
+  sequenceId String
+  sequence   Sequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+
+  leadId String?
+
+  organizationId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([sequenceId])
+  @@index([leadId])
+  @@index([status])
+  @@index([nextStepAt])
 }

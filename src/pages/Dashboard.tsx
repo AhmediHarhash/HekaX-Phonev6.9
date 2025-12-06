@@ -3,26 +3,31 @@
 // ============================================================================
 
 import { useState, useEffect } from 'react';
-import { 
-  PhoneCall, 
-  Target, 
-  Clock, 
+import {
+  PhoneCall,
+  Target,
+  Clock,
   TrendingUp,
   PhoneIncoming,
   Phone,
   MessageSquare,
   ChevronRight,
   AlertCircle,
+  Activity,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { PageHeader } from '../components/layout';
 import { Card, StatCard, LoadingSpinner, AIBadge, HumanBadge, EmptyState } from '../components/common';
+import { LiveCallDashboard } from '../components/dashboard';
 import { callsApi, leadsApi, statsApi } from '../utils/api';
 import { formatDuration, formatRelativeTime, getUrgencyColor, getStatusColor } from '../utils/formatters';
 import type { CallRecord, LeadRecord, DashboardStats } from '../types';
 
+type DashboardView = 'overview' | 'live';
+
 export function DashboardPage() {
   const { org } = useAuth();
+  const [view, setView] = useState<DashboardView>('overview');
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recentCalls, setRecentCalls] = useState<CallRecord[]>([]);
   const [recentLeads, setRecentLeads] = useState<LeadRecord[]>([]);
@@ -96,10 +101,41 @@ export function DashboardPage() {
 
   return (
     <div>
-      <PageHeader 
-        title="Dashboard" 
-        subtitle="Welcome back! Here's what's happening today."
-      />
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+        <PageHeader
+          title="Dashboard"
+          subtitle="Welcome back! Here's what's happening today."
+        />
+
+        {/* View Toggle */}
+        <div className="flex items-center gap-2 bg-slate-800/50 p-1 rounded-lg">
+          <button
+            onClick={() => setView('overview')}
+            className={`
+              px-4 py-2 rounded-md text-sm font-medium transition-all
+              ${view === 'overview'
+                ? 'bg-blue-600 text-white'
+                : 'text-slate-400 hover:text-white'
+              }
+            `}
+          >
+            Overview
+          </button>
+          <button
+            onClick={() => setView('live')}
+            className={`
+              px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2
+              ${view === 'live'
+                ? 'bg-blue-600 text-white'
+                : 'text-slate-400 hover:text-white'
+              }
+            `}
+          >
+            <Activity size={14} className={view === 'live' ? 'animate-pulse' : ''} />
+            Live
+          </button>
+        </div>
+      </div>
 
       {error && (
         <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center gap-3 text-red-400">
@@ -108,7 +144,13 @@ export function DashboardPage() {
         </div>
       )}
 
-      {/* Stats Grid */}
+      {/* Live Dashboard View */}
+      {view === 'live' && <LiveCallDashboard />}
+
+      {/* Overview View */}
+      {view === 'overview' && (
+        <>
+        {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard
           label="Calls Today"
@@ -244,7 +286,7 @@ export function DashboardPage() {
 
       {/* AI Status Card */}
       <Card className="flex items-center gap-4">
-        <div 
+        <div
           className={`w-3 h-3 rounded-full ${org?.aiEnabled ? 'bg-emerald-500' : 'bg-red-500'}`}
         />
         <div className="flex-1">
@@ -258,6 +300,8 @@ export function DashboardPage() {
           <span>"{org?.greeting || 'Thank you for calling. How may I help you?'}"</span>
         </div>
       </Card>
+        </>
+      )}
     </div>
   );
 }

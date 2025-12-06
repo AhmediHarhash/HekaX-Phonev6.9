@@ -14,7 +14,11 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(npm run build:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(npx tsc:*)",
+      "Bash(cat:*)",
+      "Bash(git -C /c/Users/Ibrahim/Desktop/workspace log --oneline -20)"
     ],
     "deny": [],
     "ask": []

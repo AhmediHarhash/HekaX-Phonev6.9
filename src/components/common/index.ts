@@ -8,3 +8,4 @@ export { Modal, Button } from './Modal';
 export { EmptyState } from './EmptyState';
 export { Card, CardHeader, StatCard } from './Card';
 export { CreateOrgModal } from './CreateOrgModal';
+export { AudioPlayer } from './AudioPlayer';

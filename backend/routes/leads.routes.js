@@ -5,6 +5,7 @@
 const express = require("express");
 const prisma = require("../lib/prisma");
 const { authMiddleware } = require("../middleware/auth.middleware");
+const automationService = require("../services/automation.service");
 
 const router = express.Router();
 
@@ -82,6 +83,8 @@ router.patch("/:id", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "Lead not found" });
     }
 
+    const oldStatus = lead.status;
+
     const updated = await prisma.lead.update({
       where: { id },
       data: {
@@ -91,6 +94,31 @@ router.patch("/:id", authMiddleware, async (req, res) => {
         ...(assignedToId !== undefined && { assignedToId }),
       },
     });
+
+    // Emit automation events
+    automationService.emit(
+      automationService.EVENTS.LEAD_UPDATED,
+      req.organizationId,
+      updated
+    );
+
+    // Check for status change
+    if (status && status !== oldStatus) {
+      automationService.emit(
+        automationService.EVENTS.LEAD_STATUS_CHANGED,
+        req.organizationId,
+        { ...updated, previousStatus: oldStatus }
+      );
+    }
+
+    // Check for assignment
+    if (assignedToId && assignedToId !== lead.assignedToId) {
+      automationService.emit(
+        automationService.EVENTS.LEAD_ASSIGNED,
+        req.organizationId,
+        { ...updated, assignedBy: req.userId }
+      );
+    }
 
     res.json(updated);
   } catch (err) {

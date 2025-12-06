@@ -18,7 +18,10 @@
       "mcp__ide__getDiagnostics",
       "Bash(npx tsc:*)",
       "Bash(cat:*)",
-      "Bash(git -C /c/Users/Ibrahim/Desktop/workspace log --oneline -20)"
+      "Bash(git -C /c/Users/Ibrahim/Desktop/workspace log --oneline -20)",
+      "Bash(npm ls:*)",
+      "Bash(npm test)",
+      "Bash(npm run test:run:*)"
     ],
     "deny": [],
     "ask": []

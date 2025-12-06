@@ -4,7 +4,7 @@
 // ============================================================================
 
 import { useState, useEffect } from "react";
-import { useAuth } from "../context/AuthContext";
+import { STORAGE_KEYS } from "../utils/constants";
 
 interface AutomationRule {
   id: string;
@@ -99,7 +99,7 @@ const OPERATORS = [
 ];
 
 export function AutomationPage() {
-  const { token } = useAuth();
+  const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
   const [activeTab, setActiveTab] = useState<Tab>("rules");
   const [rules, setRules] = useState<AutomationRule[]>([]);
   const [logs, setLogs] = useState<AutomationLog[]>([]);

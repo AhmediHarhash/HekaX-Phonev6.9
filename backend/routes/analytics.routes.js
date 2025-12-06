@@ -6,8 +6,12 @@
 const express = require("express");
 const { authMiddleware } = require("../middleware/auth.middleware");
 const analyticsService = require("../services/analytics.service");
+const { cache } = require("../lib/cache");
 
 const router = express.Router();
+
+// Cache TTL for analytics (5 minutes - data doesn't need to be real-time)
+const ANALYTICS_CACHE_TTL = 300;
 
 /**
  * GET /api/analytics
@@ -16,14 +20,17 @@ const router = express.Router();
 router.get("/", authMiddleware, async (req, res) => {
   try {
     const { startDate, endDate, granularity } = req.query;
+    const cacheKey = `analytics:${req.organizationId}:${startDate || 'default'}:${endDate || 'default'}:${granularity || 'day'}`;
 
-    const options = {
-      startDate: startDate ? new Date(startDate) : undefined,
-      endDate: endDate ? new Date(endDate) : undefined,
-      granularity: granularity || "day",
-    };
+    const analytics = await cache.getOrSet(cacheKey, async () => {
+      const options = {
+        startDate: startDate ? new Date(startDate) : undefined,
+        endDate: endDate ? new Date(endDate) : undefined,
+        granularity: granularity || "day",
+      };
+      return analyticsService.getAnalytics(req.organizationId, options);
+    }, ANALYTICS_CACHE_TTL);
 
-    const analytics = await analyticsService.getAnalytics(req.organizationId, options);
     res.json(analytics);
   } catch (err) {
     console.error("❌ GET /api/analytics error:", err);
@@ -38,12 +45,15 @@ router.get("/", authMiddleware, async (req, res) => {
 router.get("/calls", authMiddleware, async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
+    const cacheKey = `analytics:calls:${req.organizationId}:${startDate || 'default'}:${endDate || 'default'}`;
 
-    const metrics = await analyticsService.getCallMetrics(
-      req.organizationId,
-      startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-      endDate ? new Date(endDate) : new Date()
-    );
+    const metrics = await cache.getOrSet(cacheKey, async () => {
+      return analyticsService.getCallMetrics(
+        req.organizationId,
+        startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+        endDate ? new Date(endDate) : new Date()
+      );
+    }, ANALYTICS_CACHE_TTL);
 
     res.json(metrics);
   } catch (err) {
@@ -59,12 +69,15 @@ router.get("/calls", authMiddleware, async (req, res) => {
 router.get("/sentiment", authMiddleware, async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
+    const cacheKey = `analytics:sentiment:${req.organizationId}:${startDate || 'default'}:${endDate || 'default'}`;
 
-    const analysis = await analyticsService.getSentimentAnalysis(
-      req.organizationId,
-      startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-      endDate ? new Date(endDate) : new Date()
-    );
+    const analysis = await cache.getOrSet(cacheKey, async () => {
+      return analyticsService.getSentimentAnalysis(
+        req.organizationId,
+        startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+        endDate ? new Date(endDate) : new Date()
+      );
+    }, ANALYTICS_CACHE_TTL);
 
     res.json(analysis);
   } catch (err) {
@@ -80,13 +93,16 @@ router.get("/sentiment", authMiddleware, async (req, res) => {
 router.get("/topics", authMiddleware, async (req, res) => {
   try {
     const { startDate, endDate, limit } = req.query;
+    const cacheKey = `analytics:topics:${req.organizationId}:${startDate || 'default'}:${endDate || 'default'}:${limit || 10}`;
 
-    const topics = await analyticsService.getTopTopics(
-      req.organizationId,
-      startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-      endDate ? new Date(endDate) : new Date(),
-      limit ? parseInt(limit) : 10
-    );
+    const topics = await cache.getOrSet(cacheKey, async () => {
+      return analyticsService.getTopTopics(
+        req.organizationId,
+        startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+        endDate ? new Date(endDate) : new Date(),
+        limit ? parseInt(limit) : 10
+      );
+    }, ANALYTICS_CACHE_TTL);
 
     res.json(topics);
   } catch (err) {
@@ -102,12 +118,15 @@ router.get("/topics", authMiddleware, async (req, res) => {
 router.get("/peak-hours", authMiddleware, async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
+    const cacheKey = `analytics:peak-hours:${req.organizationId}:${startDate || 'default'}:${endDate || 'default'}`;
 
-    const peakHours = await analyticsService.getPeakHours(
-      req.organizationId,
-      startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-      endDate ? new Date(endDate) : new Date()
-    );
+    const peakHours = await cache.getOrSet(cacheKey, async () => {
+      return analyticsService.getPeakHours(
+        req.organizationId,
+        startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+        endDate ? new Date(endDate) : new Date()
+      );
+    }, ANALYTICS_CACHE_TTL);
 
     res.json(peakHours);
   } catch (err) {

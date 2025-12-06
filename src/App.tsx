@@ -1,34 +1,42 @@
 // ============================================================================
 // HEKAX Phone - Main App Component
-// Phase 6.3: Updated with Multi-Org Support
+// Phase 6.3: Updated with Multi-Org Support + Performance Optimization
 // ============================================================================
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { PreferencesProvider } from './context/PreferencesContext';
 import { Sidebar } from './components/layout';
 import { LoadingSpinner, CreateOrgModal } from './components/common';
 import { InstallPrompt, UpdateNotification } from './components/pwa';
-import {
-  LoginPage,
-  DashboardPage,
-  CallsPage,
-  LeadsPage,
-  SoftphonePage,
-  TeamPage,
-  SettingsPage,
-  PhoneNumbersPage,
-  AnalyticsPage,
-  AuditLogsPage,
-  BillingPage,
-  OnboardingWizard,
-  EnterprisePage,
-  DataManagementPage,
-  AITrainingPage,
-  ChannelsPage,
-  AutomationPage,
-} from './pages';
+
+// Lazy load pages for better bundle splitting
+const LoginPage = lazy(() => import('./pages/Login').then(m => ({ default: m.LoginPage })));
+const DashboardPage = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.DashboardPage })));
+const CallsPage = lazy(() => import('./pages/Calls').then(m => ({ default: m.CallsPage })));
+const LeadsPage = lazy(() => import('./pages/Leads').then(m => ({ default: m.LeadsPage })));
+const SoftphonePage = lazy(() => import('./pages/Softphone').then(m => ({ default: m.SoftphonePage })));
+const TeamPage = lazy(() => import('./pages/Team').then(m => ({ default: m.TeamPage })));
+const SettingsPage = lazy(() => import('./pages/Settings').then(m => ({ default: m.SettingsPage })));
+const PhoneNumbersPage = lazy(() => import('./pages/PhoneNumbers').then(m => ({ default: m.PhoneNumbersPage })));
+const AnalyticsPage = lazy(() => import('./pages/Analytics').then(m => ({ default: m.AnalyticsPage })));
+const AuditLogsPage = lazy(() => import('./pages/AuditLogs').then(m => ({ default: m.AuditLogsPage })));
+const BillingPage = lazy(() => import('./pages/Billing').then(m => ({ default: m.BillingPage })));
+const OnboardingWizard = lazy(() => import('./pages/Onboarding').then(m => ({ default: m.OnboardingWizard })));
+const EnterprisePage = lazy(() => import('./pages/Enterprise').then(m => ({ default: m.EnterprisePage })));
+const DataManagementPage = lazy(() => import('./pages/DataManagement').then(m => ({ default: m.DataManagementPage })));
+const AITrainingPage = lazy(() => import('./pages/AITraining').then(m => ({ default: m.AITrainingPage })));
+const ChannelsPage = lazy(() => import('./pages/Channels').then(m => ({ default: m.ChannelsPage })));
+const AutomationPage = lazy(() => import('./pages/Automation').then(m => ({ default: m.AutomationPage })));
+
 import type { Page } from './types';
+
+// Page loading fallback
+const PageLoader = () => (
+  <div className="flex items-center justify-center min-h-[400px]">
+    <LoadingSpinner text="Loading..." />
+  </div>
+);
 
 // Main app content (requires auth)
 function AppContent() {
@@ -68,18 +76,24 @@ function AppContent() {
 
   // Not authenticated - show login
   if (!isAuthenticated) {
-    return <LoginPage />;
+    return (
+      <Suspense fallback={<LoadingSpinner fullScreen text="Loading..." />}>
+        <LoginPage />
+      </Suspense>
+    );
   }
 
   // Show onboarding for new orgs
   if (showOnboarding) {
     return (
-      <OnboardingWizard 
-        onComplete={() => {
-          setShowOnboarding(false);
-          refreshUser?.();
-        }} 
-      />
+      <Suspense fallback={<LoadingSpinner fullScreen text="Loading..." />}>
+        <OnboardingWizard
+          onComplete={() => {
+            setShowOnboarding(false);
+            refreshUser?.();
+          }}
+        />
+      </Suspense>
     );
   }
 
@@ -140,7 +154,9 @@ function AppContent() {
       {/* Main Content - responsive margin for mobile/desktop */}
       <main className="lg:ml-64 min-h-screen p-4 lg:p-6 pt-20 lg:pt-6">
         <div className="max-w-7xl mx-auto">
-          {renderPage()}
+          <Suspense fallback={<PageLoader />}>
+            {renderPage()}
+          </Suspense>
         </div>
       </main>
 

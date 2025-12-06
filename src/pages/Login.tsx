@@ -33,7 +33,7 @@ export function LoginPage() {
         const data = await authApi.register(orgName, email, password, name);
         
         // Store auth data with correct keys
-        localStorage.setItem(STORAGE_KEYS.TOKEN, data.token);
+        localStorage.setItem(STORAGE_KEYS.TOKEN, data.accessToken);
         localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(data.user));
         localStorage.setItem(STORAGE_KEYS.ORG, JSON.stringify(data.organization));
         

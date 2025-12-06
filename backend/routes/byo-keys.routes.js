@@ -109,9 +109,10 @@ router.post("/:provider", authMiddleware, requireRole("OWNER", "ADMIN"), async (
       select: { plan: true },
     });
 
-    if (org.plan !== "ENTERPRISE" && org.plan !== "SCALE") {
+    // BYO Keys available for all paid plans (teams can have multiple members)
+    if (org.plan === "TRIAL") {
       return res.status(403).json({
-        error: "BYO Keys is an Enterprise feature. Please upgrade your plan."
+        error: "BYO Keys require a paid plan. Please upgrade to access this feature."
       });
     }
 
@@ -395,8 +396,9 @@ router.post("/toggle", authMiddleware, requireRole("OWNER", "ADMIN"), async (req
       select: { plan: true },
     });
 
-    if (org.plan !== "ENTERPRISE" && org.plan !== "SCALE") {
-      return res.status(403).json({ error: "BYO Keys is an Enterprise feature" });
+    // BYO Keys available for all paid plans
+    if (org.plan === "TRIAL") {
+      return res.status(403).json({ error: "BYO Keys require a paid plan" });
     }
 
     await prisma.organization.update({

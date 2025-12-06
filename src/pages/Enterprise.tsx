@@ -96,8 +96,8 @@ export function EnterprisePage() {
   const [createdKey, setCreatedKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // Check if enterprise (SCALE and ENTERPRISE have enterprise features)
-  const isEnterprise = org?.plan === 'ENTERPRISE' || org?.plan === 'SCALE';
+  // All paid plans have access to advanced features (they can have multiple members)
+  const hasPaidPlan = org?.plan && org.plan !== 'TRIAL';
 
   useEffect(() => {
     fetchByoKeys();
@@ -229,27 +229,27 @@ export function EnterprisePage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Non-enterprise view (for STARTER and BUSINESS_PRO plans)
-  if (!isEnterprise) {
+  // Trial users need to upgrade
+  if (!hasPaidPlan) {
     return (
       <div>
         <PageHeader
           title="Advanced Settings"
-          description="BYO Keys and API access for Scale plans"
+          description="BYO Keys and API access for paid plans"
         />
 
         <Card className="text-center py-12">
           <Lock size={48} className="mx-auto text-slate-600 mb-4" />
           <h3 className="text-xl font-semibold text-white mb-2">
-            Scale Plan Required
+            Paid Plan Required
           </h3>
           <p className="text-slate-400 mb-6 max-w-md mx-auto">
-            BYO Keys and API access are available on the Scale plan.
+            BYO Keys and API access are available on all paid plans.
             Upgrade to use your own API keys and access our platform API.
           </p>
           <Button onClick={() => window.dispatchEvent(new CustomEvent('navigate', { detail: 'billing' }))}>
             <Zap size={18} />
-            Upgrade to Scale
+            View Plans
           </Button>
         </Card>
       </div>

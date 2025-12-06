@@ -108,6 +108,286 @@
 }
 
 /* ============================================================================
+   System Theme - Enterprise SaaS Color Palette
+   A sophisticated blend with unique identity - soft dark with accent colors
+   ============================================================================ */
+.system-theme {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
+  --bg-card: #161b22;
+  --bg-input: #0d1117;
+  --border-color: #30363d;
+  --border-color-light: #21262d;
+  --text-primary: #f0f6fc;
+  --text-secondary: #c9d1d9;
+  --text-tertiary: #8b949e;
+  --text-muted: #6e7681;
+  --accent-primary: #58a6ff;
+  --accent-secondary: #a371f7;
+  --accent-success: #3fb950;
+  --accent-warning: #d29922;
+  --accent-danger: #f85149;
+  --shadow-sm: 0 1px 0 rgba(27, 31, 35, 0.04);
+  --shadow-md: 0 3px 6px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --gradient-hero: linear-gradient(135deg, #161b22 0%, #0d1117 50%, #21262d 100%);
+}
+
+.system-theme body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.system-theme .min-h-screen.bg-slate-900 {
+  background-color: var(--bg-primary) !important;
+}
+
+.system-theme .bg-slate-900 {
+  background-color: var(--bg-primary) !important;
+}
+
+.system-theme .bg-slate-800,
+.system-theme .bg-slate-800\/50,
+.system-theme .bg-slate-800\/80 {
+  background-color: var(--bg-card) !important;
+  border-color: var(--border-color);
+}
+
+.system-theme .bg-slate-900\/50 {
+  background-color: var(--bg-tertiary) !important;
+}
+
+.system-theme .bg-slate-700 {
+  background-color: var(--bg-tertiary) !important;
+}
+
+.system-theme .bg-slate-700\/30 {
+  background-color: rgba(33, 38, 45, 0.5) !important;
+}
+
+.system-theme .border-slate-700,
+.system-theme .border-slate-700\/50,
+.system-theme .border-slate-800 {
+  border-color: var(--border-color) !important;
+}
+
+.system-theme .border-slate-600 {
+  border-color: #484f58 !important;
+}
+
+.system-theme .text-white {
+  color: var(--text-primary) !important;
+}
+
+.system-theme .text-slate-100 {
+  color: var(--text-primary) !important;
+}
+
+.system-theme .text-slate-200 {
+  color: var(--text-secondary) !important;
+}
+
+.system-theme .text-slate-300 {
+  color: var(--text-secondary) !important;
+}
+
+.system-theme .text-slate-400 {
+  color: var(--text-tertiary) !important;
+}
+
+.system-theme .text-slate-500 {
+  color: var(--text-muted) !important;
+}
+
+/* System theme - Blue accent colors (enterprise feel) */
+.system-theme .bg-blue-600 {
+  background-color: var(--accent-primary) !important;
+}
+
+.system-theme .bg-blue-500 {
+  background-color: #388bfd !important;
+}
+
+.system-theme .text-blue-400 {
+  color: var(--accent-primary) !important;
+}
+
+.system-theme .text-blue-500 {
+  color: #388bfd !important;
+}
+
+.system-theme .border-blue-500 {
+  border-color: var(--accent-primary) !important;
+}
+
+/* System theme - Purple accent (enterprise sophistication) */
+.system-theme .text-purple-400 {
+  color: var(--accent-secondary) !important;
+}
+
+.system-theme .bg-purple-500 {
+  background-color: #8957e5 !important;
+}
+
+/* System theme - Success states */
+.system-theme .bg-emerald-500 {
+  background-color: var(--accent-success) !important;
+}
+
+.system-theme .text-emerald-400 {
+  color: var(--accent-success) !important;
+}
+
+.system-theme .bg-emerald-500\/10 {
+  background-color: rgba(63, 185, 80, 0.15) !important;
+}
+
+/* System theme - Warning states */
+.system-theme .bg-amber-500 {
+  background-color: var(--accent-warning) !important;
+}
+
+.system-theme .text-amber-400 {
+  color: var(--accent-warning) !important;
+}
+
+.system-theme .bg-amber-500\/10 {
+  background-color: rgba(210, 153, 34, 0.15) !important;
+}
+
+/* System theme - Danger states */
+.system-theme .bg-red-500 {
+  background-color: var(--accent-danger) !important;
+}
+
+.system-theme .text-red-400 {
+  color: var(--accent-danger) !important;
+}
+
+.system-theme .bg-red-500\/10 {
+  background-color: rgba(248, 81, 73, 0.15) !important;
+}
+
+/* System theme sidebar - professional navigation */
+.system-theme aside {
+  background-color: var(--bg-secondary) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* System theme cards with subtle borders */
+.system-theme [class*="rounded-xl"][class*="border"],
+.system-theme [class*="rounded-2xl"][class*="border"] {
+  background-color: var(--bg-card);
+  border-color: var(--border-color);
+  box-shadow: var(--shadow-sm);
+}
+
+.system-theme [class*="rounded-xl"][class*="border"]:hover,
+.system-theme [class*="rounded-2xl"][class*="border"]:hover {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 1px var(--accent-primary), var(--shadow-md);
+}
+
+/* System theme inputs - refined appearance */
+.system-theme input,
+.system-theme textarea,
+.system-theme select {
+  background-color: var(--bg-input) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+
+.system-theme input:focus,
+.system-theme textarea:focus,
+.system-theme select:focus {
+  border-color: var(--accent-primary) !important;
+  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15) !important;
+}
+
+.system-theme input::placeholder,
+.system-theme textarea::placeholder {
+  color: var(--text-muted) !important;
+}
+
+/* System theme buttons */
+.system-theme .bg-slate-700:not(.peer-checked\:bg-blue-600):not([class*="rounded-full"]) {
+  background-color: var(--bg-tertiary) !important;
+  color: var(--text-primary) !important;
+}
+
+.system-theme .bg-slate-700:hover:not(.peer-checked\:bg-blue-600):not([class*="rounded-full"]) {
+  background-color: #30363d !important;
+}
+
+/* System theme modal backdrop */
+.system-theme .bg-black\/70 {
+  background-color: rgba(0, 0, 0, 0.7) !important;
+}
+
+/* System theme scrollbar - sleek */
+.system-theme ::-webkit-scrollbar-track {
+  background-color: var(--bg-secondary);
+}
+
+.system-theme ::-webkit-scrollbar-thumb {
+  background-color: #484f58;
+}
+
+.system-theme ::-webkit-scrollbar-thumb:hover {
+  background-color: #6e7681;
+}
+
+/* System theme hover states */
+.system-theme .hover\:bg-slate-700\/30:hover {
+  background-color: rgba(33, 38, 45, 0.8) !important;
+}
+
+.system-theme .hover\:bg-slate-600:hover {
+  background-color: #30363d !important;
+}
+
+/* System theme gradients - enterprise feel */
+.system-theme .from-slate-800\/80 {
+  --tw-gradient-from: rgba(22, 27, 34, 0.95) !important;
+}
+
+.system-theme .to-slate-900\/80 {
+  --tw-gradient-to: rgba(13, 17, 23, 0.95) !important;
+}
+
+/* System theme stat cards - refined gradients */
+.system-theme .from-blue-500\/10 {
+  --tw-gradient-from: rgba(88, 166, 255, 0.15) !important;
+}
+
+.system-theme .from-emerald-500\/10 {
+  --tw-gradient-from: rgba(63, 185, 80, 0.15) !important;
+}
+
+.system-theme .from-purple-500\/10 {
+  --tw-gradient-from: rgba(163, 113, 247, 0.15) !important;
+}
+
+.system-theme .from-amber-500\/10 {
+  --tw-gradient-from: rgba(210, 153, 34, 0.15) !important;
+}
+
+/* System theme table rows */
+.system-theme tr:hover {
+  background-color: var(--bg-tertiary) !important;
+}
+
+/* System theme badges refinement */
+.system-theme .bg-blue-500\/10 {
+  background-color: rgba(88, 166, 255, 0.15) !important;
+}
+
+.system-theme .bg-purple-500\/10 {
+  background-color: rgba(163, 113, 247, 0.15) !important;
+}
+
+/* ============================================================================
    Light Theme - Professional SaaS Style
    ============================================================================ */
 .light-theme {

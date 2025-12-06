@@ -33,9 +33,10 @@ router.get("/", authMiddleware, requireRole("OWNER", "ADMIN"), async (req, res) 
       select: { plan: true },
     });
 
-    if (org.plan !== "ENTERPRISE" && org.plan !== "SCALE") {
+    // API Keys available for all paid plans (they can have multiple members)
+    if (org.plan === "TRIAL") {
       return res.status(403).json({
-        error: "API Keys is an Enterprise feature",
+        error: "API Keys require a paid plan. Please upgrade to access this feature.",
         isEnterprise: false,
       });
     }
@@ -85,8 +86,9 @@ router.post("/", authMiddleware, requireRole("OWNER", "ADMIN"), async (req, res)
       select: { plan: true },
     });
 
-    if (org.plan !== "ENTERPRISE" && org.plan !== "SCALE") {
-      return res.status(403).json({ error: "API Keys is an Enterprise feature" });
+    // API Keys available for all paid plans
+    if (org.plan === "TRIAL") {
+      return res.status(403).json({ error: "API Keys require a paid plan" });
     }
 
     // Validate permissions

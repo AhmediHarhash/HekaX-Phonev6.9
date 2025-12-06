@@ -10,6 +10,7 @@ const twilio = require("twilio");
 const EventEmitter = require("events");
 const { CalendarService } = require("./calendar");
 const { CRMService } = require("./crm");
+const { emit: emitAutomation, EVENTS: AutomationEvents } = require("./automation.service");
 
 // ============================================================================
 // VOICE OPTIONS (OpenAI TTS)
@@ -315,6 +316,18 @@ class AIReceptionist extends EventEmitter {
     this.setState(ConversationState.GREETING);
 
     try {
+      // Emit CALL_STARTED automation event
+      if (this.organization?.id) {
+        emitAutomation(AutomationEvents.CALL_STARTED, {
+          organizationId: this.organization.id,
+          callSid: this.callSid,
+          fromNumber: this.fromNumber,
+          toNumber: this.toNumber,
+          direction: "INBOUND",
+          handledByAI: true,
+        });
+      }
+
       // Connect to Deepgram streaming STT
       await this.connectToDeepgram();
 
@@ -765,6 +778,20 @@ class AIReceptionist extends EventEmitter {
     this.callerInfo.reason = args.reason || this.callerInfo.reason;
     this.callerInfo.urgency = args.urgency?.toUpperCase() || this.callerInfo.urgency;
     this.setState(ConversationState.TRANSFERRING);
+
+    // Emit CALL_TRANSFERRED automation event
+    if (this.organization?.id) {
+      emitAutomation(AutomationEvents.CALL_TRANSFERRED, {
+        organizationId: this.organization.id,
+        callSid: this.callSid,
+        fromNumber: this.fromNumber,
+        reason: args.reason,
+        urgency: this.callerInfo.urgency,
+        callerName: this.callerInfo.name,
+        callerInfo: this.callerInfo,
+      });
+    }
+
     return { success: true, message: "Initiating transfer" };
   }
 
@@ -798,6 +825,23 @@ class AIReceptionist extends EventEmitter {
 
         if (calendarResult.success) {
           console.log("✅ Calendar booking created:", calendarResult.eventId);
+
+          // Emit APPOINTMENT_BOOKED automation event
+          if (this.organization?.id) {
+            emitAutomation(AutomationEvents.APPOINTMENT_BOOKED, {
+              organizationId: this.organization.id,
+              eventId: calendarResult.eventId,
+              eventLink: calendarResult.eventLink,
+              callerName: this.callerInfo.name,
+              callerPhone: this.callerInfo.phone,
+              purpose: args.purpose,
+              date: args.date,
+              time: args.time,
+              duration: args.duration || 30,
+              callSid: this.callSid,
+            });
+          }
+
           this.setState(ConversationState.LISTENING);
           return {
             success: true,
@@ -1342,6 +1386,16 @@ CONVERSATION GUIDELINES:
               },
             });
             console.log("✅ Lead created:", this.callerInfo.name || "Unknown");
+
+            // Emit LEAD_CREATED automation event
+            if (this.organization?.id) {
+              emitAutomation(AutomationEvents.LEAD_CREATED, {
+                organizationId: this.organization.id,
+                lead: savedLead,
+                source: "ai_call",
+                callSid: this.callSid,
+              });
+            }
           }
         }
       } catch (err) {
@@ -1383,6 +1437,22 @@ CONVERSATION GUIDELINES:
         console.error("⚠️ CRM sync error:", crmError.message);
         // Don't throw - CRM sync failures shouldn't break the call cleanup
       }
+    }
+
+    // Emit CALL_COMPLETED automation event
+    if (this.organization?.id) {
+      emitAutomation(AutomationEvents.CALL_COMPLETED, {
+        organizationId: this.organization.id,
+        call: savedCallLog,
+        callSid: this.callSid,
+        duration: callDuration,
+        handledByAI: true,
+        transferredToHuman: this.transferredToHuman,
+        lead: savedLead,
+        transcript: savedTranscript,
+        sentiment: this.callerInfo.sentiment,
+        urgency: this.callerInfo.urgency,
+      });
     }
 
     console.log("🧹 Cleanup complete");

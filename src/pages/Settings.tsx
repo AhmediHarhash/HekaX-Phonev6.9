@@ -1178,16 +1178,16 @@ function PreferencesTab() {
             className={`
               p-4 rounded-xl border transition-all
               ${preferences.theme === 'system'
-                ? 'border-blue-500 bg-blue-500/10 shadow-lg shadow-blue-500/10'
+                ? 'border-purple-500 bg-purple-500/10 shadow-lg shadow-purple-500/10'
                 : 'border-slate-700 bg-slate-800/50 hover:border-slate-600'
               }
             `}
           >
             <div className="flex items-center justify-center gap-2">
-              <Monitor size={20} className={preferences.theme === 'system' ? 'text-emerald-400' : 'text-slate-400'} />
-              <span className="text-white font-medium">System</span>
+              <Monitor size={20} className={preferences.theme === 'system' ? 'text-purple-400' : 'text-slate-400'} />
+              <span className="text-white font-medium">Enterprise</span>
             </div>
-            <p className="text-xs text-slate-500 mt-2">Match your OS</p>
+            <p className="text-xs text-slate-500 mt-2">Modern & refined</p>
           </button>
         </div>
       </div>
